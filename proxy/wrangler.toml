@@ -1,0 +1,14 @@
+# Cloudflare Worker 설정 — 대시보드에서 이 저장소를 연결(Git 배포)하면 이 파일대로 배포된다.
+# 루트 디렉터리: proxy
+name = "receipt-trip"
+main = "worker.js"
+compatibility_date = "2026-01-22"
+
+# 실행 위치를 미국(Google us-central1 근처)으로 고정한다.
+# 무료 요금제는 한국 사용자를 홍콩(HKG)으로 보내는데, Gemini는 홍콩발 요청을
+# "User location is not supported"로 거절한다(2026-11 실측). 대시보드엔 리전 지정 메뉴가 없고
+# (Smart만 있음) 이 설정 파일로만 지정할 수 있다.
+[placement]
+region = "gcp:us-central1"
+
+# GEMINI_KEY는 여기 쓰지 않는다 — 대시보드 Secret으로 이미 넣어 두었다(배포해도 유지된다).
