@@ -351,7 +351,7 @@
       html +=
         '<div class="fab">' +
         '<button type="button" class="btn btn--ghost" id="addManual">직접 입력</button>' +
-        '<button type="button" class="btn btn--ghost" id="addAlbum">앨범에서</button>' +
+        '<button type="button" class="btn btn--ghost" id="addAlbum">앨범에서 (여러 장)</button>' +
         '<button type="button" class="btn btn--primary btn--big" id="addCamera">영수증 찍기</button>' +
         "</div>";
     }
@@ -414,7 +414,11 @@
     var located = ents.filter(function (e) { return Geo.has(e.place); });
     var km = state.day === "all" ? Geo.pathKm(located.map(function (e) { return e.place; })) : shown[0] ? shown[0].km : 0;
 
-    var html = warnRates();
+    var html = '<div id="batchBox"></div>' + warnRates();
+    var review = state.entries.filter(function (e) { return e.needsReview; }).length;
+    if (review && !(state.batch && state.batch.busy && state.batch.bookId === b.id)) {
+      html += '<div class="banner">자동으로 정리한 기록 ' + review + "건이 있습니다. <b>확인 필요</b> 표시를 눌러 날짜·금액을 사진과 한 번 비교해 주세요.</div>";
+    }
     html += '<div class="summary"><div><small>' + (state.day === "all" ? "총 지출" : "이날 지출") + "</small><strong>" + moneyMain(ents, t.total) + "</strong>" + moneyRef(ents, t.total) + "</div>" +
       "<div><small>발자취</small><strong>" + located.length + "곳</strong></div>" +
       "<div><small>이동(직선)</small><strong>" + (km >= 10 ? Math.round(km) : km.toFixed(1)) + "km</strong></div></div>";
@@ -458,7 +462,7 @@
         html +=
           '<li id="ent-' + e.id + '"><a class="entry' + (has ? "" : " is-unplaced") + '" href="#/entry/' + b.id + "/" + e.id + '">' +
           '<span class="trail__dot">' + (has ? esc(pinNo) : "?") + "</span>" +
-          '<span class="entry__main"><b>' + esc(placeName(e)) + "</b>" +
+          '<span class="entry__main"><b>' + esc(placeName(e)) + "</b>" + (e.needsReview ? ' <span class="tag tag--warn">확인 필요</span>' : "") +
           '<small class="entry__items">' + (e.time ? esc(e.time) + " · " : "") + esc(e.category || "기타") + (where ? " · " + esc(where) : "") +
           (has ? (Geo.isApprox(e.place) ? ' <span class="tag">대략</span>' : "") : ' <span class="tag tag--warn">위치 없음</span>') + "</small></span>" +
           '<span class="entry__amt">' +
@@ -687,6 +691,7 @@
         };
       });
       drawFootMap();
+      renderBatch();
       var rl = document.getElementById("relocate");
       if (rl) rl.onclick = relocateAll;
     }
@@ -889,9 +894,125 @@
   function onFiles(files) {
     files = Array.prototype.slice.call(files || []).filter(function (f) { return /^image\//.test(f.type) || /\.(heic|heif)$/i.test(f.name); });
     if (!files.length || !state.book) return;
+    // 여러 장이면 한 장씩 확인 화면을 띄우지 않고 뒤에서 차례로 인식해 바로 저장한다("확인 필요" 표시).
+    if (files.length > 1) return startBatch(state.book, files);
     state.queue = files;
     state.draft = null;
     go("#/entry/" + state.book.id + "/new");
+  }
+
+  // ============================================================ 여러 장 자동 정리
+  // state.batch = { bookId, total, done, failed, busy }
+  // 사진마다: 압축 + 사진 GPS → Gemini 인식 → 기록·사진 저장(needsReview) → 주소로 위치 찾기(뒤에서).
+  // 한꺼번에 보내면 Gemini가 붐빔(503)으로 막으므로 한 장씩, 사이에 1.5초 쉰다.
+  var BATCH_GAP_MS = 1500;
+  function startBatch(book, files) {
+    if (state.batch && state.batch.busy) {
+      state.batch.total += files.length;
+      state.batch.files = state.batch.files.concat(files);
+      renderBatch();
+      return;
+    }
+    state.batch = { bookId: book.id, total: files.length, done: 0, failed: 0, busy: true, files: files.slice() };
+    toast("영수증 " + files.length + "장을 차례로 정리합니다. 다른 화면을 봐도 계속 진행돼요.", 4000);
+    if ((location.hash || curPath).indexOf("#/book/" + book.id) !== 0) go("#/book/" + book.id);
+    else renderBatch();
+    runBatch(book);
+  }
+
+  function runBatch(book) {
+    var bt = state.batch;
+    var f = bt.files.shift();
+    if (!f) {
+      bt.busy = false;
+      toast("영수증 " + bt.total + "장 정리 끝" + (bt.failed ? " · 인식 못 한 " + bt.failed + "장은 직접 입력해 주세요" : "") + ". '확인 필요' 표시를 눌러 숫자를 확인하세요.", 6000);
+      refreshIfOnBook(book.id);
+      return;
+    }
+    var e = draftFor(book);
+    Promise.all([Scan.compress(f), Geo.exifGps(f)])
+      .then(function (res) {
+        e._blob = res[0];
+        e._gps = res[1];
+        if (!Store.canScan()) throw new Error("자동 인식을 쓰려면 설정에서 키가 필요합니다.");
+        return Scan.recognize(e._blob, book).then(function (r) {
+          Object.assign(e, r, { payer: e.payer, splitAmong: e.splitAmong });
+          if (!e.date) e.date = draftFor(book).date;
+          e.memo = r.note ? "AI 메모: " + r.note : "";
+        });
+      })
+      .catch(function (err) {
+        bt.failed++;
+        e.memo = "자동 인식 실패: " + err.message;
+      })
+      .then(function () {
+        e.needsReview = true;
+        if (!e.category) e.category = "기타";
+        if (e._gps && !Geo.has(e.place)) e.place = Object.assign({}, e.place, { lat: e._gps.lat, lng: e._gps.lng, src: "photo", label: "사진 찍은 곳" });
+        return saveEntryFor(book, e);
+      })
+      .then(function () {
+        bt.done++;
+        refreshIfOnBook(book.id);
+        // 위치 찾기는 기다리지 않는다(지도 검색은 따로 1.1초 간격 줄 세우기)
+        var p = e.place || {};
+        if (!Geo.has(p) && (p.query || p.address || p.city)) {
+          Geo.locate(e, null).then(function (place) {
+            if (!Geo.has(place)) return;
+            return Store.get("entries", e.id).then(function (rec) {
+              if (rec && !Geo.has(rec.place)) {
+                rec.place = place;
+                return Store.put("entries", rec).then(function () { refreshIfOnBook(book.id); });
+              }
+            });
+          });
+        }
+      }, function (err) {
+        bt.done++;
+        bt.failed++;
+        toast("저장하지 못한 사진이 있습니다: " + err.message, 4000);
+      })
+      .then(function () {
+        setTimeout(function () { runBatch(book); }, BATCH_GAP_MS);
+      });
+  }
+
+  // 지금 그 여행의 발자취 탭을 보고 있으면 새로 그린다(스크롤 위치 유지)
+  function refreshIfOnBook(bookId) {
+    if (!state.book || state.book.id !== bookId) return;
+    var p = (location.hash || curPath).replace(/^#\/?/, "").split("/");
+    if (p[0] !== "book" || p[1] !== bookId || (p[2] && p[2] !== "list")) return renderBatch();
+    var y = window.scrollY;
+    Promise.all([Store.byBook("entries", bookId), Store.get("books", bookId)]).then(function (r) {
+      state.entries = r[0];
+      if (r[1]) state.book = r[1];
+      releaseUrls();
+      viewBook("list");
+      window.scrollTo(0, y);
+    });
+  }
+
+  function renderBatch() {
+    var box = document.getElementById("batchBox");
+    var bt = state.batch;
+    if (!box) return;
+    if (!bt || !state.book || bt.bookId !== state.book.id || !bt.busy) {
+      box.innerHTML = "";
+      return;
+    }
+    box.innerHTML = '<div class="banner banner--busy"><span class="spinner"></span> 영수증 ' + bt.total + "장 중 " + bt.done + "장 정리됨" +
+      (bt.failed ? " (인식 못 함 " + bt.failed + ")" : "") + " — 남은 사진은 자동으로 이어집니다.</div>";
+  }
+
+  function draftFor(book) {
+    return {
+      bookId: book.id,
+      date: book.start && (today() < book.start || (book.end && today() > book.end)) ? book.start : today(),
+      time: "", merchant: "", merchantKo: "",
+      currency: (book.currencies || [])[0] || "KRW",
+      items: [], tax: 0, discount: 0, total: 0, category: "", payMethod: "",
+      payer: (book.members || ["나"])[0], splitAmong: [], memo: "",
+    };
   }
   document.getElementById("fileCamera").addEventListener("change", function (e) { onFiles(e.target.files); e.target.value = ""; });
   document.getElementById("fileAlbum").addEventListener("change", function (e) { onFiles(e.target.files); e.target.value = ""; });
@@ -1044,6 +1165,7 @@
       });
     });
 
+    if (e.needsReview && !isNew) setScanBox("여러 장을 한꺼번에 올려 <b>자동으로 정리한 기록</b>입니다. 날짜·금액을 사진과 비교하고 저장하면 확인 완료로 바뀝니다." + (e.memo && /^자동 인식 실패/.test(e.memo) ? "<br><small>" + esc(e.memo) + "</small>" : ""));
     if (e._needScan) startScan(e);
   }
 
@@ -1059,12 +1181,18 @@
     }
   }
 
+  // 확인 화면에서 저장 = 사람이 확인했다는 뜻 → "확인 필요" 표시를 지운다
   function saveEntry(e) {
+    e.needsReview = false;
+    return saveEntryFor(state.book, e);
+  }
+
+  function saveEntryFor(book, e) {
     var rec = {};
     Object.keys(e).forEach(function (k) {
       if (k.charAt(0) !== "_") rec[k] = e[k];
     });
-    rec.bookId = state.book.id;
+    rec.bookId = book.id;
     rec.items = (e.items || []).filter(function (it) { return it.name || it.nameKo || it.amount; });
     rec.updatedAt = new Date().toISOString();
     var photo = e._blob ? Store.put("photos", { id: rec.photoId || Store.uid(), blob: e._blob }) : Promise.resolve(null);
@@ -1073,12 +1201,14 @@
       return Store.put("entries", rec).then(function (saved) {
         e.id = saved.id; // 위치 찾기가 저장 뒤에 끝나도 이 기록에 반영되게
         // 여행 통화에 없던 외화 영수증이면 여행 통화에 자동으로 넣는다(환율 표·환전 탭에 바로 보이게)
-        var bk = state.book;
-        if (bk && rec.currency && rec.currency !== "KRW" && (bk.currencies || []).indexOf(rec.currency) < 0) {
-          bk.currencies = (bk.currencies || []).concat([rec.currency]);
-          return Store.put("books", bk).then(function () { return saved; });
-        }
-        return saved;
+        return Store.get("books", book.id).then(function (bk) {
+          if (bk && rec.currency && rec.currency !== "KRW" && (bk.currencies || []).indexOf(rec.currency) < 0) {
+            bk.currencies = (bk.currencies || []).concat([rec.currency]);
+            if (state.book && state.book.id === bk.id) state.book.currencies = bk.currencies;
+            return Store.put("books", bk).then(function () { return saved; });
+          }
+          return saved;
+        });
       });
     });
   }
