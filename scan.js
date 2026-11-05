@@ -416,5 +416,196 @@
     });
   };
 
+  // ---------------------------------------------------------------------
+  // 예약 캡처 → 새 여행 자동 채우기
+  // ---------------------------------------------------------------------
+  // 항공 예약, 기차(KTX·SRT·신칸센), 고속버스, 배, 렌터카, 숙소 예약 화면이나 확인 메일을 읽어
+  // 일정 조각(legs)을 뽑는다. 여러 장을 합쳐 여행지·기간을 판단한다.
+  // 승객 이름·예약번호·좌석·연락처는 받지 않는다.
+  function legsPrompt() {
+    return [
+      "너는 여행 예약 판독기다. 사진은 항공 예약, 기차(KTX·SRT·신칸센 등), 고속·시외버스, 배(페리), 렌터카, 숙소(호텔·에어비앤비) 예약 화면이나 확인 메일이다.",
+      "예약된 일정 조각마다 legs 배열에 한 건씩 넣는다. 왕복이면 가는 편·오는 편을 따로 넣는다. 오늘 날짜는 " + new Date().toISOString().slice(0, 10) + "이다.",
+      "규칙:",
+      "- type: flight(항공), train(기차), bus(버스), ship(배), car(렌터카), stay(숙소) 중 하나.",
+      "- date: 출발(숙소는 체크인, 렌터카는 대여) 현지 날짜 YYYY-MM-DD. 연도가 없으면 오늘 이후 가장 가까운 날로 추정.",
+      "- end_date: 숙소는 체크아웃, 렌터카는 반납 날짜. 그 외에는 빈 문자열.",
+      "- time: 출발(체크인·대여) 현지 시각 HH:MM(24시간). 없으면 빈 문자열.",
+      "- from_city_ko: 출발 도시의 한국어 이름(예: 인천, 서울, 오사카). 숙소·렌터카는 빈 문자열.",
+      "- to_city_ko: 도착 도시의 한국어 이름. 숙소·렌터카는 그 장소가 있는 도시.",
+      "- from_code, to_code: 항공이면 IATA 공항 코드(ICN, KIX 등), 아니면 빈 문자열.",
+      "- to_country: to_city_ko가 있는 나라의 ISO 3166-1 alpha-2 코드(KR, JP, TH 등).",
+      "- name: 편명·열차명·숙소 이름 등(예: KE723, KTX 101, 힐튼 오사카). company: 항공사·철도·회사 이름.",
+      "- 승객·투숙객 이름, 예약번호, 좌석번호, 항공권 번호, 연락처, 결제 카드 정보는 어디에도 적지 않는다.",
+      "- note: 예약 정보가 아니거나 확신이 없는 부분이 있으면 한국어 한 문장. 없으면 빈 문자열.",
+    ].join("\n");
+  }
+
+  var LEG_TYPES = ["flight", "train", "bus", "ship", "car", "stay"];
+  var LEGS_SCHEMA = {
+    type: "OBJECT",
+    properties: {
+      legs: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            type: { type: "STRING", enum: LEG_TYPES },
+            date: { type: "STRING" },
+            end_date: { type: "STRING" },
+            time: { type: "STRING" },
+            from_city_ko: { type: "STRING" },
+            to_city_ko: { type: "STRING" },
+            from_code: { type: "STRING" },
+            to_code: { type: "STRING" },
+            to_country: { type: "STRING" },
+            name: { type: "STRING" },
+            company: { type: "STRING" },
+          },
+          required: ["type", "date", "to_city_ko"],
+        },
+      },
+      note: { type: "STRING" },
+    },
+    required: ["legs"],
+  };
+  SC.LEG_ICON = { flight: "✈", train: "🚄", bus: "🚌", ship: "⛴", car: "🚗", stay: "🏨" };
+
+  // 나라 → 여행 통화. 한국은 외화 없음(국내 여행).
+  var EURO = "AT BE CY DE EE ES FI FR GR HR IE IT LT LU LV MT NL PT SI SK".split(" ");
+  var COUNTRY_CUR = {
+    JP: "JPY", US: "USD", GU: "USD", MP: "USD", CN: "CNY", TW: "TWD", HK: "HKD", MO: "HKD", TH: "THB", VN: "VND", PH: "PHP",
+    SG: "SGD", MY: "MYR", ID: "IDR", GB: "GBP", AU: "AUD", CA: "CAD", CH: "CHF", NZ: "NZD",
+  };
+  SC.currencyOf = function (country) {
+    country = String(country || "").toUpperCase();
+    if (country === "KR" || !country) return "";
+    if (EURO.indexOf(country) >= 0) return "EUR";
+    return COUNTRY_CUR[country] || "";
+  };
+
+  // 인식 결과 → 정리된 일정 조각 [{type,date,endDate,time,fromCity,toCity,from,to,toCountry,name,company}]
+  SC.normalizeLegs = function (raw) {
+    var ymd = function (s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : ""; };
+    var list = (raw && Array.isArray(raw.legs) ? raw.legs : []).map(function (f) {
+      return {
+        type: LEG_TYPES.indexOf(f.type) >= 0 ? f.type : "flight",
+        date: ymd(f.date),
+        endDate: ymd(f.end_date),
+        time: /^\d{1,2}:\d{2}/.test(f.time || "") ? String(f.time).slice(0, 5).padStart(5, "0") : "",
+        fromCity: String(f.from_city_ko || "").trim(),
+        toCity: String(f.to_city_ko || "").trim(),
+        from: String(f.from_code || "").toUpperCase().trim(),
+        to: String(f.to_code || "").toUpperCase().trim(),
+        toCountry: String(f.to_country || "").toUpperCase().trim(),
+        name: String(f.name || "").trim(),
+        company: String(f.company || "").trim(),
+      };
+    }).filter(function (f) { return f.date && (f.toCity || f.to); });
+    return { legs: list, note: String((raw && raw.note) || "").trim() };
+  };
+
+  // 같은 조각(종류+날짜+이름, 이름 없으면 종류+날짜+도착지)이 여러 장에 겹쳐 나오면 하나로
+  SC.mergeLegs = function (a, b) {
+    var out = (a || []).slice();
+    (b || []).forEach(function (f) {
+      var dup = out.some(function (g) {
+        if (g.type !== f.type || g.date !== f.date) return false;
+        return f.name && g.name ? g.name === f.name : g.toCity === f.toCity && g.fromCity === f.fromCity;
+      });
+      if (!dup) out.push(f);
+    });
+    // 시각이 없으면 숙소는 체크인(15:00), 나머지는 정오로 보고 정렬 — 같은 날 "숙소"가 "가는 비행기"보다 앞서지 않게
+    var key = function (f) { return f.date + (f.time || (f.type === "stay" ? "15:00" : "12:00")); };
+    return out.sort(function (x, y) { return key(x).localeCompare(key(y)); });
+  };
+
+  // 일정 조각 →{start, end, home, dest, places[], currencies[], name}
+  // 기간: 가장 이른 날 ~ 가장 늦은 날(숙소 체크아웃·렌터카 반납 포함).
+  // 출발지(집) = 첫 이동 조각의 출발 도시. 여행지 = 집이 아닌 도착 도시들(나온 순서).
+  SC.tripFromLegs = function (legs) {
+    if (!legs || !legs.length) return null;
+    var moves = legs.filter(function (f) { return f.type !== "stay" && f.type !== "car"; });
+    var firstMove = moves[0];
+    var home = firstMove ? firstMove.fromCity || firstMove.from : "";
+    var homeCode = firstMove ? firstMove.from : "";
+    var isHome = function (f) { return (home && f.toCity === home) || (homeCode && f.to === homeCode); };
+    var places = [];
+    var curs = [];
+    legs.forEach(function (f) {
+      if (isHome(f)) return;
+      var c = f.toCity || f.to;
+      if (c && places.indexOf(c) < 0) places.push(c);
+      var cur = SC.currencyOf(f.toCountry);
+      if (cur && curs.indexOf(cur) < 0) curs.push(cur);
+    });
+    var dates = [];
+    legs.forEach(function (f) { dates.push(f.date); if (f.endDate) dates.push(f.endDate); });
+    dates.sort();
+    var start = dates[0];
+    var end = dates[dates.length - 1];
+    var month = Number(start.slice(5, 7));
+    var nights = Math.round((new Date(end + "T00:00:00") - new Date(start + "T00:00:00")) / 86400000);
+    var label = places.slice(0, 2).join("·") || (legs[0].toCity || legs[0].to);
+    return {
+      start: start,
+      end: end,
+      home: home,
+      dest: places.join(", "),
+      places: places,
+      currencies: curs,
+      name: month + "월 " + label + (nights >= 1 && nights <= 14 ? " " + nights + "박 " + (nights + 1) + "일" : ""),
+    };
+  };
+
+  // 여행지 글자(나라·도시 한국어 이름) → 나라 코드 목록. "도쿄·방콕"처럼 여러 곳이면 여러 개.
+  // 한두 글자짜리 흔한 말과 겹치는 이름(나라·빈·니스)은 넣지 않는다 — "테니스"가 프랑스가 되지 않게.
+  var PLACE_COUNTRY = [
+    ["KR", "한국 국내 제주 서귀포 부산 강릉 속초 서울 경주 여수 전주 통영 거제 남해 포항 대구 광주 인천 춘천 양양 울릉 안동"],
+    ["JP", "일본 도쿄 동경 오사카 교토 고베 후쿠오카 삿포로 홋카이도 오키나와 나고야 가고시마 요코하마 히로시마 구마모토 벳푸 유후인 오이타 다카마쓰 마쓰야마 시즈오카 센다이 하코다테 오타루 나가사키 미야자키 니가타 가나자와 하카타"],
+    ["US", "미국 뉴욕 엘에이 로스앤젤레스 샌프란시스코 하와이 호놀룰루 라스베이거스 시애틀 시카고 보스턴 워싱턴 마이애미 올랜도 샌디에이고"],
+    ["GU", "괌"], ["MP", "사이판"],
+    ["CN", "중국 베이징 북경 상하이 상해 칭다오 청도 장자제 장가계 시안 광저우 선전 하얼빈 다롄 대련 청두"],
+    ["TW", "대만 타이베이 타이페이 가오슝 타이중 타이난 화롄"],
+    ["HK", "홍콩"], ["MO", "마카오"],
+    ["TH", "태국 방콕 치앙마이 푸켓 파타야 끄라비 코사무이"],
+    ["VN", "베트남 다낭 하노이 호치민 나트랑 냐짱 푸꾸옥 달랏 호이안 하롱"],
+    ["PH", "필리핀 세부 마닐라 보라카이 보홀 클락"],
+    ["SG", "싱가포르"],
+    ["MY", "말레이시아 쿠알라룸푸르 코타키나발루 페낭 랑카위"],
+    ["ID", "인도네시아 발리 자카르타 롬복"],
+    ["GB", "영국 런던 에든버러 맨체스터"],
+    ["AU", "호주 시드니 멜버른 브리즈번 골드코스트 케언즈 퍼스"],
+    ["CA", "캐나다 밴쿠버 토론토 몬트리올 캘거리 퀘벡"],
+    ["CH", "스위스 취리히 인터라켄 제네바 루체른 체르마트"],
+    ["NZ", "뉴질랜드 오클랜드 퀸스타운 크라이스트처치"],
+    ["FR", "프랑스 파리 리옹 마르세유"], ["DE", "독일 베를린 뮌헨 프랑크푸르트 함부르크"],
+    ["IT", "이탈리아 로마 밀라노 베네치아 베니스 피렌체 나폴리"], ["ES", "스페인 바르셀로나 마드리드 세비야 그라나다"],
+    ["PT", "포르투갈 리스본 포르투"], ["NL", "네덜란드 암스테르담"], ["AT", "오스트리아 비엔나 잘츠부르크"],
+    ["GR", "그리스 아테네 산토리니"], ["BE", "벨기에 브뤼셀"], ["FI", "핀란드 헬싱키"], ["HR", "크로아티아 두브로브니크 자그레브"],
+  ];
+  SC.countriesOf = function (text) {
+    var t = String(text || "");
+    var out = [];
+    PLACE_COUNTRY.forEach(function (row) {
+      var hit = row[1].split(" ").some(function (w) { return w && t.indexOf(w) >= 0; });
+      if (hit && out.indexOf(row[0]) < 0) out.push(row[0]);
+    });
+    return out;
+  };
+  // 여행지 글자 → 쓸 외화 목록(국내면 빈 배열)
+  SC.currenciesFor = function (text) {
+    var out = [];
+    SC.countriesOf(text).forEach(function (c) {
+      var cur = SC.currencyOf(c);
+      if (cur && out.indexOf(cur) < 0) out.push(cur);
+    });
+    return out;
+  };
+
+  SC.recognizeLegs = function (blob) {
+    return callVision(blob, legsPrompt(), LEGS_SCHEMA).then(SC.normalizeLegs);
+  };
+
   global.Scan = SC;
 })(this);

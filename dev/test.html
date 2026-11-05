@@ -131,6 +131,26 @@
   // EXIF가 없는 JPEG
   t("EXIF 없는 JPEG → null", Geo.parseExifGps(new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 0, 4, 0, 0]).buffer), null);
 
+  // ---- 예약 캡처 → 여행
+  var lg = Scan.normalizeLegs({ legs: [
+    { type: "flight", date: "2026-11-05", time: "18:40", from_city_ko: "오사카", to_city_ko: "인천", from_code: "kix", to_code: "icn", to_country: "KR", name: "KE724" },
+    { type: "flight", date: "2026-11-03", time: "9:05", from_city_ko: "인천", to_city_ko: "오사카", from_code: "ICN", to_code: "KIX", to_country: "JP", name: "KE723" },
+    { type: "stay", date: "2026-11-03", end_date: "2026-11-05", to_city_ko: "오사카", to_country: "JP", name: "힐튼 오사카" },
+    { type: "bogus", date: "", to_city_ko: "x" },
+  ] });
+  t("예약: 빈 날짜 제거·코드 대문자·시각 0패딩", [lg.legs.length, lg.legs[0].from, lg.legs[1].time], [3, "KIX", "09:05"]);
+  var merged = Scan.mergeLegs([], lg.legs);
+  merged = Scan.mergeLegs(merged, [lg.legs[1]]); // 같은 캡처 두 번
+  t("예약: 합치기(중복 제거·시간순)", merged.map(function (f) { return f.name; }), ["KE723", "힐튼 오사카", "KE724"]);
+  var tr = Scan.tripFromLegs(merged);
+  t("예약 → 여행 기간·여행지·외화·이름", [tr.start, tr.end, tr.dest, tr.currencies, tr.name], ["2026-11-03", "2026-11-05", "오사카", ["JPY"], "11월 오사카 2박 3일"]);
+  var jj = Scan.tripFromLegs(Scan.normalizeLegs({ legs: [
+    { type: "flight", date: "2026-12-20", from_city_ko: "서울", to_city_ko: "제주", from_code: "GMP", to_code: "CJU", to_country: "KR" },
+    { type: "car", date: "2026-12-20", end_date: "2026-12-23", to_city_ko: "제주", to_country: "KR" },
+  ] }).legs);
+  t("예약: 국내(제주) → 외화 없음·렌터카 반납일까지", [jj.currencies, jj.end, jj.name], [[], "2026-12-23", "12월 제주 3박 4일"]);
+  t("여행지 글자 → 외화", [Scan.currenciesFor("오사카"), Scan.currenciesFor("도쿄·방콕"), Scan.currenciesFor("제주 2박"), Scan.currenciesFor("파리, 로마"), Scan.currenciesFor("테니스 여행")], [["JPY"], ["JPY", "THB"], [], ["EUR"], []]);
+
   // ---- 통계
   var se = [
     { date: "2026-11-01", currency: "KRW", total: 1000, category: "식비" },

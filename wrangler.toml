@@ -1,0 +1,15 @@
+# Cloudflare Worker(공용 인식 중계 서버) 설정 — 대시보드에서 이 저장소를 Git 연결하면 이 파일대로 배포된다.
+# 저장소 맨 위에 둔다: 루트 디렉터리 설정을 비워 둬도(기본값) 이 파일이 쓰이게.
+# (2026-11 실측: 설정이 proxy/ 안에만 있으면 Cloudflare가 저장소 전체를 정적 사이트로 올려
+#  중계 서버 주소에 앱 화면이 떠 버렸다.)
+name = "receipt-trip"
+main = "proxy/worker.js"
+compatibility_date = "2026-01-22"
+
+# 실행 위치를 미국(Google us-central1 근처)으로 고정한다.
+# 무료 요금제는 한국 사용자를 홍콩(HKG)으로 보내는데, Gemini는 홍콩발 요청을
+# "User location is not supported"로 거절한다(2026-11 실측). 대시보드엔 리전 지정 메뉴가 없다.
+[placement]
+region = "gcp:us-central1"
+
+# GEMINI_KEY는 여기 쓰지 않는다 — 대시보드 Secret으로 넣어 둔다(배포해도 유지된다).

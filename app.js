@@ -160,41 +160,149 @@
 
   // ============================================================ 새 가계부 / 수정
   function viewNewBook(edit) {
-    var b = edit || { type: "trip", name: "", currencies: [], members: ["나"], start: today(), end: "" };
+    var b = edit || { type: "trip", name: "", dest: "", currencies: [], members: ["나"], start: today(), end: "" };
     var isEdit = !!edit;
+    // 쓸 외화는 긴 목록에서 고르지 않는다 — 여행지 글자나 예약 캡처로 자동으로 정하고,
+    // 필요하면 태그를 지우거나 하나 더 붙인다. 영수증·환전 기록에 새 통화가 나와도 자동 추가된다.
+    var curs = (b.currencies || []).slice();
+    var legs = (b.legs || []).slice();
+    var touchedCur = isEdit && curs.length > 0; // 직접 만진 외화는 여행지 입력으로 덮어쓰지 않는다
     $app.innerHTML =
       '<a class="back" href="' + (isEdit ? "#/book/" + b.id + "/manage" : "#/") + '">← 돌아가기</a>' +
       "<h1>" + (isEdit ? "여행 정보 수정" : "새 여행") + "</h1>" +
+      '<section class="panel"><h2>예약 캡처로 채우기</h2>' +
+      '<p class="hint" style="margin:0 0 10px">항공·기차·버스·배·렌터카·숙소 예약 화면이나 확인 메일을 올리면 여행지·기간·외화·이름을 채웁니다. 여러 장을 한 번에 올려도 됩니다. 예약 없이 차로 가는 여행은 아래에 직접 입력하세요.</p>' +
+      '<button type="button" class="btn btn--primary btn--block" id="legShot">예약 캡처 올리기</button>' +
+      '<input type="file" id="legFile" accept="image/*" multiple hidden>' +
+      '<div id="legBox"></div></section>' +
       '<form id="bookForm" class="form">' +
       '<label class="field"><span>여행 이름</span><input name="name" required maxlength="40" placeholder="예: 11월 오사카 / 제주 2박 3일" value="' + esc(b.name) + '"></label>' +
-      "<div>" +
+      '<label class="field"><span>여행지</span><input name="dest" maxlength="60" placeholder="예: 오사카, 방콕, 제주" value="' + esc(b.dest || "") + '"></label>' +
+      '<div class="field"><span>쓸 외화 <small class="muted">(여행지에 맞춰 자동)</small></span><div id="curTags" class="curtags"></div></div>' +
       '<div class="row2"><label class="field"><span>출발일</span><input type="date" name="start" value="' + esc(b.start) + '"></label>' +
       '<label class="field"><span>돌아오는 날</span><input type="date" name="end" value="' + esc(b.end) + '"></label></div>' +
-      '<fieldset class="field"><legend>쓸 외화 <small class="muted">(국내 여행이면 비워 두세요)</small></legend><div class="chips">' +
-      CURRENCIES.filter(function (c) { return c !== "KRW"; })
-        .map(function (c) {
-          return '<label class="chip"><input type="checkbox" name="cur" value="' + c + '"' + ((b.currencies || []).indexOf(c) >= 0 ? " checked" : "") + "><span>" + c + " " + CUR_NAME[c] + "</span></label>";
-        })
-        .join("") +
-      "</div></fieldset>" +
       '<label class="field"><span>일행 (쉼표로 구분, 첫 사람이 기본 결제자)</span><input name="members" placeholder="나, 민지, 현우" value="' + esc((b.members || []).join(", ")) + '"></label>' +
       '<p class="hint">혼자 가는 여행이면 "나"만 두세요. 정산 탭이 숨겨집니다.</p>' +
-      "</div>" +
       '<button class="btn btn--primary btn--block" type="submit">' + (isEdit ? "저장" : "만들기") + "</button>" +
       "</form>";
 
     var form = document.getElementById("bookForm");
+
+    function renderCurs() {
+      var box = document.getElementById("curTags");
+      var rest = CURRENCIES.filter(function (c) { return c !== "KRW" && curs.indexOf(c) < 0; });
+      box.innerHTML =
+        (curs.length
+          ? curs.map(function (c) {
+              return '<span class="curtag">' + c + " " + (CUR_NAME[c] || "") + ' <button type="button" data-rm="' + c + '" aria-label="' + c + ' 빼기">×</button></span>';
+            }).join("")
+          : '<span class="curtag curtag--none">원화만 (국내 여행)</span>') +
+        '<select id="curAdd" aria-label="외화 추가"><option value="">+ 추가</option>' +
+        rest.map(function (c) { return '<option value="' + c + '">' + c + " " + (CUR_NAME[c] || "") + "</option>"; }).join("") +
+        "</select>";
+      box.querySelectorAll("[data-rm]").forEach(function (btn) {
+        btn.onclick = function () {
+          touchedCur = true;
+          curs = curs.filter(function (c) { return c !== btn.getAttribute("data-rm"); });
+          renderCurs();
+        };
+      });
+      document.getElementById("curAdd").onchange = function () {
+        if (!this.value) return;
+        touchedCur = true;
+        curs.push(this.value);
+        renderCurs();
+      };
+    }
+    renderCurs();
+
+    form.dest.addEventListener("input", function () {
+      if (touchedCur) return;
+      curs = Scan.currenciesFor(this.value);
+      renderCurs();
+    });
+    form.name.addEventListener("input", function () { delete this.dataset.auto; });
+
+    // ---- 예약 캡처
+    var busy = 0;
+    var msgs = [];
+    function renderLegs() {
+      var box = document.getElementById("legBox");
+      var html = "";
+      if (busy) html += '<div class="banner banner--busy" style="margin-top:12px"><span class="spinner"></span> 예약 정보를 읽고 있습니다… (남은 ' + busy + "장)</div>";
+      msgs.forEach(function (m) { html += '<div class="banner banner--warn" style="margin-top:12px">' + esc(m) + "</div>"; });
+      if (legs.length) {
+        html += '<ul class="legs">' + legs.map(function (f) {
+          var when = f.date.slice(5).replace("-", "/") + (f.endDate ? " ~ " + f.endDate.slice(5).replace("-", "/") : "") + (f.time ? " " + f.time : "");
+          var where = f.type === "stay" || f.type === "car" ? f.toCity : (f.fromCity || f.from) + " → " + (f.toCity || f.to);
+          return '<li><span class="legs__icon">' + (Scan.LEG_ICON[f.type] || "") + "</span><b>" + esc(when) + "</b> " + esc(where) +
+            '<small class="muted"> ' + esc([f.name, f.company].filter(Boolean).join(" · ")) + "</small></li>";
+        }).join("") + "</ul>" +
+          '<p class="hint">아래 칸을 채웠습니다. 날짜가 맞는지 한 번 확인하세요.</p>';
+      }
+      box.innerHTML = html;
+    }
+    renderLegs();
+    function applyLegs() {
+      var trip = Scan.tripFromLegs(legs);
+      if (!trip) return;
+      if (!form.name.value.trim() || form.name.dataset.auto) {
+        form.name.value = trip.name;
+        form.name.dataset.auto = "1";
+      }
+      if (trip.dest) form.dest.value = trip.dest;
+      form.start.value = trip.start;
+      form.end.value = trip.end;
+      if (!touchedCur) {
+        curs = trip.currencies.length ? trip.currencies.slice() : Scan.currenciesFor(trip.dest);
+        renderCurs();
+      }
+    }
+    document.getElementById("legShot").onclick = function () {
+      if (!Store.canScan()) return toast("설정에서 Gemini API 키를 먼저 넣어 주세요.", 4000);
+      document.getElementById("legFile").click();
+    };
+    document.getElementById("legFile").onchange = function (ev) {
+      var files = Array.prototype.slice.call(ev.target.files || []);
+      ev.target.value = "";
+      if (!files.length) return;
+      busy = files.length;
+      msgs = [];
+      renderLegs();
+      files.reduce(function (p, f, i) {
+        return p.then(function () {
+          var tag = files.length > 1 ? i + 1 + "번째 사진: " : "";
+          return Scan.compress(f)
+            .then(Scan.recognizeLegs)
+            .then(function (r) {
+              if (!r.legs.length) msgs.push(tag + "예약 정보를 찾지 못했습니다." + (r.note ? " (" + r.note + ")" : ""));
+              else if (r.note) msgs.push("AI 메모: " + r.note);
+              legs = Scan.mergeLegs(legs, r.legs);
+              applyLegs();
+            })
+            .catch(function (err) { msgs.push(tag + err.message); })
+            .then(function () {
+              busy--;
+              renderLegs();
+            });
+        });
+      }, Promise.resolve());
+    };
+
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
       var fd = new FormData(form);
       var nb = Object.assign({}, b, {
         type: "trip",
         name: String(fd.get("name") || "").trim(),
+        dest: String(fd.get("dest") || "").trim(),
         createdAt: b.createdAt || new Date().toISOString(),
       });
       nb.start = fd.get("start") || "";
       nb.end = fd.get("end") || "";
-      nb.currencies = fd.getAll("cur");
+      // 여행지만 적고 외화를 안 만졌는데 자동 판정도 비었으면 그대로 국내(원화만)
+      nb.currencies = curs.slice();
+      nb.legs = legs;
       nb.members = String(fd.get("members") || "")
         .split(/[,，]/)
         .map(function (s) { return s.trim(); })
@@ -224,7 +332,13 @@
     var html =
       '<a class="back" href="#/">← 여행 목록</a>' +
       '<div class="book-head"><span class="card__tag">' + ((b.currencies || []).length ? "해외" : "국내") + "</span><h1>" + esc(b.name) + "</h1>" +
-      (b.start ? '<span class="muted">' + esc(b.start + (b.end ? " ~ " + b.end : "")) + "</span>" : "") + "</div>" +
+      (b.start ? '<span class="muted">' + esc(b.start + (b.end ? " ~ " + b.end : "")) + (b.dest ? " · " + esc(b.dest) : "") + "</span>" : "") +
+      ((b.legs || []).length
+        ? '<ul class="legs legs--head">' + b.legs.map(function (f) {
+            var where = f.type === "stay" || f.type === "car" ? f.toCity : (f.fromCity || f.from) + "→" + (f.toCity || f.to);
+            return "<li>" + (Scan.LEG_ICON[f.type] || "") + " " + esc(f.date.slice(5).replace("-", "/") + (f.time ? " " + f.time : "") + " " + where) + "</li>";
+          }).join("") + "</ul>"
+        : "") + "</div>" +
       '<nav class="tabs">' +
       tabs.map(function (t) {
         return '<a class="tab' + (t[0] === tab ? " is-active" : "") + '" href="#/book/' + b.id + "/" + t[0] + '">' + t[1] + "</a>";
@@ -945,6 +1059,12 @@
       if (p) rec.photoId = e.photoId = p.id;
       return Store.put("entries", rec).then(function (saved) {
         e.id = saved.id; // 위치 찾기가 저장 뒤에 끝나도 이 기록에 반영되게
+        // 여행 통화에 없던 외화 영수증이면 여행 통화에 자동으로 넣는다(환율 표·환전 탭에 바로 보이게)
+        var bk = state.book;
+        if (bk && rec.currency && rec.currency !== "KRW" && (bk.currencies || []).indexOf(rec.currency) < 0) {
+          bk.currencies = (bk.currencies || []).concat([rec.currency]);
+          return Store.put("books", bk).then(function () { return saved; });
+        }
         return saved;
       });
     });
@@ -1265,7 +1385,7 @@
           if (!e.date) e.date = today();
           // 여행 통화 목록에 없는 통화가 나오면 알려 준다(목록에 자동 추가하진 않음)
           var msg = "인식 완료. <b>숫자와 날짜를 사진과 한 번 비교</b>한 뒤 저장하세요.";
-          if (bookCurrencies(b).indexOf(e.currency) < 0) msg += " 영수증 통화(" + e.currency + ")가 이 여행의 통화 목록에 없습니다.";
+          if (bookCurrencies(b).indexOf(e.currency) < 0) msg += " 영수증 통화(" + e.currency + ")는 저장하면 이 여행의 외화에 자동으로 추가됩니다.";
           if (r.note) msg += '<br><small>AI 메모: ' + esc(r.note) + "</small>";
           renderEntry(e, !e.id);
           setScanBox(msg, "banner--ok");

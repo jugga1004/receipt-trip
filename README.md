@@ -74,9 +74,9 @@ GitHub `jugga1004`에 Public 저장소 `receipt-trip` → 이 폴더 파일 업�
 4. 나온 주소`https://receipt-trip.jugga1004.workers.dev` — `config.js`에 이미 들어 있다(Worker 이름을 다르게 지으면 여기를 고친다)
 
 **실행 지역 고정(필수)**: 무료 요금제는 한국 사용자를 홍콩(HKG) 데이터센터로 보내고, Gemini는 홍콩발 요청을
-"User location is not supported"로 거절한다(2026-11 실측, 3회 연속). `proxy/wrangler.toml`의 `placement.region = "gcp:us-central1"`로
+"User location is not supported"로 거절한다(2026-11 실측, 3회 연속). 저장소 맨 위 `wrangler.toml`(main = `proxy/worker.js`)의 `placement.region = "gcp:us-central1"`로
 미국에서 실행되게 한다. 대시보드에는 리전 지정이 없으므로(Smart만 있음) Worker 설정 → 빌드 → **Git 저장소 연결**
-(저장소 `receipt-trip`, 루트 디렉터리 `proxy`)로 이 파일을 써서 배포한다. 앱은 이 경우를 451로 받아 두 번까지 다시 시도한다.
+(저장소 `receipt-trip`, 루트 디렉터리는 비워 둠)로 이 파일을 써서 배포한다. 설정 파일이 `proxy/` 안에만 있으면 Cloudflare가 저장소 전체를 정적 사이트로 올려 버린다(실측). 앱은 이 경우를 451로 받아 두 번까지 다시 시도한다.
 
 막아 둔 것: `jugga1004.github.io`에서 온 요청만, flash 계열 모델만, 4MB 이하, IP당 분당 15회(대략).
 Origin은 브라우저 밖에선 꾸밀 수 있으므로 **Google 쪽 하루 요청 상한도 같이 걸어 둘 것**(Google Cloud 콘솔 → Generative Language API → 할당량).

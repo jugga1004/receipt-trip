@@ -406,3 +406,18 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--brand) 5
 .costsum__kpi { background: var(--surface-2); border: 0; margin-bottom: 10px; }
 .costsum .kv { margin-bottom: 8px; }
 .costsum .btn { margin-top: 8px; }
+
+/* ---------------------------------------------------------------- 외화 태그·예약 일정 */
+.curtags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.curtag {
+  display: inline-flex; align-items: center; gap: 4px; padding: 5px 6px 5px 11px; border-radius: 99px;
+  background: var(--brand-soft); color: var(--text); font-size: 14px; font-weight: 600;
+}
+.curtag button { border: 0; background: none; color: var(--text-2); font-size: 16px; line-height: 1; padding: 0 4px; cursor: pointer; }
+.curtag--none { background: var(--surface-2); color: var(--text-2); font-weight: 500; padding-right: 11px; }
+.curtags select { width: auto; padding: 5px 8px; border-radius: 99px; font-size: 13px; }
+.legs { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.legs li { font-size: 14px; }
+.legs__icon { display: inline-block; width: 1.6em; }
+.legs--head { flex-basis: 100%; margin: 2px 0 0; display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.legs--head li { font-size: 12px; color: var(--text-2); }
