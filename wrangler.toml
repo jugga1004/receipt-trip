@@ -5,6 +5,8 @@
 name = "receipt-trip"
 main = "proxy/worker.js"
 compatibility_date = "2026-01-22"
+# 대시보드에서 넣은 변수를 Git 배포가 지우지 않게(2026-11 실측: 배포 뒤 GEMINI_KEY가 사라졌다)
+keep_vars = true
 
 # 실행 위치를 미국(Google us-central1 근처)으로 고정한다.
 # 무료 요금제는 한국 사용자를 홍콩(HKG)으로 보내는데, Gemini는 홍콩발 요청을
