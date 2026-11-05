@@ -14,7 +14,10 @@
   var SC = {};
   var TIMEOUT_MS = 90000;
   var MAX_SIDE = 1600;
-  var RETRY_503 = 1; // 모델마다 1번 더(3초 뒤), 그래도 붐비면 다음 모델
+  // 붐빔(503)이면 5초·12초·25초 기다리며 모델을 번갈아 다시 보낸다(총 약 45초).
+  // 2026-11 실측: 이미지 요청을 몇 초 안에 연달아 보내면 첫 번째만 200, 나머지는 503 —
+  // 바로 재시도하면 계속 막히고 간격을 두면 풀린다. 진행 상황은 SC.onBusy(n, 전체, 대기ms)로 알린다.
+  var BUSY_WAITS = [5000, 12000, 25000];
   // 모델: 2026-11 실측 — 2.5-flash는 "새 사용자에겐 제공 안 함"(404),
   // 3.8-flash는 503(붐빔)이 잦고 3.5-flash는 바로 응답 → 3.5를 먼저, 붐비면 3.8로 넘어간다.
   SC.MODELS = ["gemini-3.5-flash", "gemini-3.8-flash"];
@@ -269,15 +272,13 @@
           maxOutputTokens: 8192,
         },
       });
-      // 503(모델이 붐빔)·451(중계 서버가 Gemini 불가 지역에서 실행됨)은 잠깐 뒤 풀리는 일이 많아
-      // 3초·6초 뒤 두 번까지 다시 보낸다.
-      // (2026-11 실측: gemini-3.8-flash가 연달아 503 "high demand")
-      function attempt(n, mi) {
+      // 503(붐빔)·451(지역 거절)은 BUSY_WAITS 간격으로 모델을 번갈아(3.5 → 3.8 → 3.5 → 3.8) 다시 보낸다.
+      function attempt(n) {
         var controller = new AbortController();
         var timer = setTimeout(function () {
           controller.abort();
         }, TIMEOUT_MS);
-        return fetch(urlFor(models[mi]), {
+        return fetch(urlFor(models[n % models.length]), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
@@ -286,10 +287,10 @@
           function (res) {
             clearTimeout(timer);
             var busy = res.status === 503 || res.status === 451;
-            if (busy && mi + 1 < models.length) return attempt(0, mi + 1); // 이 모델은 포기하고 예비 모델로
-            if (busy && n < RETRY_503) {
-              return new Promise(function (r) { setTimeout(r, 3000 * (n + 1)); }).then(function () {
-                return attempt(n + 1, mi);
+            if (busy && n < BUSY_WAITS.length) {
+              if (SC.onBusy) SC.onBusy(n + 1, BUSY_WAITS.length, BUSY_WAITS[n]);
+              return new Promise(function (r) { setTimeout(r, BUSY_WAITS[n]); }).then(function () {
+                return attempt(n + 1);
               });
             }
             return res.text().then(function (body) {
@@ -320,7 +321,7 @@
           }
         );
       }
-      return attempt(0, 0);
+      return attempt(0);
     });
   }
 

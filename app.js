@@ -1475,6 +1475,11 @@
 
   // ============================================================ 시작
   window.addEventListener("hashchange", route);
+  // 인식 서버가 붐벼 다시 시도할 때 화면 아래에 알린다(영수증·환전·여행 일정 공통)
+  Scan.onBusy = function (n, total, ms) {
+    toast("Gemini가 붐벼서 " + Math.round(ms / 1000) + "초 뒤 다시 시도합니다 (" + n + "/" + total + ")", ms);
+  };
+
   Store.init().then(function () {
     if (Store.isMemory()) document.getElementById("memWarn").hidden = false;
     // 저장 공간을 브라우저가 임의로 비우지 않게 요청(허용 여부는 브라우저 판단)
