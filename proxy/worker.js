@@ -25,6 +25,8 @@ function cors(origin) {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "86400",
+    // 실행 위치 확인용(cf-placement: remote-OMA 같은 값). 앱 개발자 도구에서 볼 수 있게 노출
+    "Access-Control-Expose-Headers": "cf-placement, cf-ray",
     Vary: "Origin",
   };
 }
@@ -84,7 +86,8 @@ export default {
     // 앱이 알아보고 다시 시도하도록 451로 바꿔 돌려준다. 근본 해결은 Worker 배치(Placement)를 미국 등으로 두는 것.
     if (upstream.status === 400 && /location is not supported/i.test(text)) {
       const colo = (request.cf && request.cf.colo) || "?";
-      return fail(451, "중계 서버가 Gemini를 쓸 수 없는 지역(" + colo + ")에서 실행됐습니다.", origin);
+      // request.cf.colo는 요청을 "받은" 곳(예: HKG)이라 실제 실행 위치와 다를 수 있다 → 응답 헤더 cf-placement로 확인
+      return fail(451, "Gemini가 중계 서버 위치를 지원하지 않는다고 거절했습니다. (받은 곳 " + colo + ")", origin);
     }
     return new Response(text, {
       status: upstream.status,
