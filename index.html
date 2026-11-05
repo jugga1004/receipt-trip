@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<title>영수증 여행기록</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#1f6f5c" />
+<meta name="description" content="영수증으로 남기는 여행 발자취 — 지도·일정·경비" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="영수증여행" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <a href="#/" class="topbar__home" id="homeLink">
+    <img src="icon.svg" alt="" width="28" height="28" />
+    <span>영수증 여행기록</span>
+  </a>
+  <a href="#/settings" class="topbar__btn" aria-label="설정">설정</a>
+</header>
+
+<div id="memWarn" class="banner banner--warn" hidden>
+  이 브라우저에선 기기 저장소를 쓸 수 없어 <b>임시 모드</b>로 동작합니다. 새로고침하면 기록이 사라집니다.
+</div>
+
+<main id="app" class="app"></main>
+
+<!-- 사진 크게 보기 -->
+<div id="viewer" class="viewer" hidden>
+  <img id="viewerImg" alt="영수증 사진" />
+  <button type="button" class="btn btn--ghost viewer__close" id="viewerClose">닫기</button>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<!-- 숨은 파일 입력: 촬영 / 앨범 -->
+<input type="file" id="fileCamera" accept="image/*" capture="environment" hidden />
+<input type="file" id="fileAlbum" accept="image/*" multiple hidden />
+<input type="file" id="fileFx" accept="image/*" multiple hidden />
+<input type="file" id="fileRestore" accept="application/json,.json" hidden />
+
+<script src="store.js"></script>
+<script src="fx.js"></script>
+<script src="geo.js"></script>
+<script src="map.js"></script>
+<script src="scan.js"></script>
+<script src="settle.js"></script>
+<script src="stats.js"></script>
+<script src="csv.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

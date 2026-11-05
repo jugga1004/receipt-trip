@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="영수증 가계부">
+  <rect width="512" height="512" rx="112" fill="#1f6f5c"/>
+  <!-- 아래가 톱니 모양인 영수증 -->
+  <path d="M150 96h212a16 16 0 0 1 16 16v300l-30-22-31 22-31-22-30 22-31-22-31 22-30-22v-278a16 16 0 0 1 16-16z" fill="#ffffff"/>
+  <rect x="186" y="150" width="140" height="18" rx="9" fill="#1f6f5c" opacity="0.35"/>
+  <rect x="186" y="196" width="100" height="18" rx="9" fill="#1f6f5c" opacity="0.35"/>
+  <rect x="186" y="242" width="120" height="18" rx="9" fill="#1f6f5c" opacity="0.35"/>
+  <rect x="186" y="300" width="140" height="26" rx="13" fill="#1f6f5c"/>
+</svg>

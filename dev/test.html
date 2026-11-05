@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>receipt-book 로직 테스트</title>
+<style>
+  body { font: 14px/1.5 monospace; padding: 16px; }
+  .ok { color: #1d7a43; } .fail { color: #c23a3a; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>로직 테스트</h1>
+<p id="summary"></p>
+<ol id="out"></ol>
+<script src="../store.js"></script>
+<script src="../fx.js"></script>
+<script src="../geo.js"></script>
+<script src="../map.js"></script>
+<script src="../scan.js"></script>
+<script src="../settle.js"></script>
+<script src="../stats.js"></script>
+<script src="../csv.js"></script>
+<script>
+(function () {
+  var pass = 0, fail = 0, out = document.getElementById("out");
+  function t(name, got, want) {
+    var ok = JSON.stringify(got) === JSON.stringify(want);
+    ok ? pass++ : fail++;
+    var li = document.createElement("li");
+    li.className = ok ? "ok" : "fail";
+    li.textContent = (ok ? "PASS " : "FAIL ") + name + (ok ? "" : " — got " + JSON.stringify(got) + " want " + JSON.stringify(want));
+    out.appendChild(li);
+  }
+
+  // ---- 환율: 가중평균
+  var xs = [
+    { currency: "JPY", foreignAmount: 30000, krwAmount: 270000 },
+    { currency: "JPY", foreignAmount: 20000, krwAmount: 185000 },
+    { currency: "USD", foreignAmount: 100, krwAmount: 139000 },
+  ];
+  var r = FX.rates(xs);
+  t("JPY 가중평균 9.1", Math.round(r.JPY.rate * 1000) / 1000, 9.1);
+  t("USD 1390", r.USD.rate, 1390);
+  t("엔 환산 1,000엔 → 9,100원", FX.krw({ currency: "JPY", total: 1000 }, r), 9100);
+  t("KRW는 그대로", FX.krw({ currency: "KRW", total: 4500 }, r), 4500);
+  t("환율 없는 통화는 null", FX.krw({ currency: "THB", total: 100 }, r), null);
+  t("카드 청구액 덮어쓰기", FX.krw({ currency: "JPY", total: 1000, krwOverride: 9350 }, r), 9350);
+  t("환율 직접 입력", FX.krw({ currency: "JPY", total: 1000, rateOverride: 9.4 }, r), 9400);
+  t("청구액 기준 적용환율", FX.rateOf({ currency: "JPY", total: 1000, krwOverride: 9350 }, r), 9.35);
+  t("엔 환율 표시는 100단위", FX.fmtRate(9.1, "JPY"), "100 JPY = 910원");
+  t("원화 표시", FX.won(12345), "12,345원");
+  t("USD 소수 표시", FX.fmt(12.5, "USD"), "12.50 USD");
+
+  // ---- 남은 현금
+  var cl = FX.cashLeft(xs, [
+    { currency: "JPY", total: 5000, payMethod: "cash" },
+    { currency: "JPY", total: 8000, payMethod: "card" },
+    { currency: "JPY", total: 1000, payMethod: "" },
+  ]);
+  t("남은 현금(카드 제외, 미상은 현금)", cl.JPY.left, 44000);
+
+  // ---- 정산
+  var members = ["나", "민지", "현우"];
+  var krw = function (e) { return FX.krw(e, r); };
+  var ents = [
+    { currency: "KRW", total: 90000, payer: "나", splitAmong: [] },          // 각 30000
+    { currency: "KRW", total: 30000, payer: "민지", splitAmong: ["민지", "현우"] }, // 각 15000
+    { currency: "THB", total: 500, payer: "현우" },                          // 환율 없음 → 제외
+  ];
+  var s = Settle.compute(ents, members, krw);
+  t("정산 net", s.people.map(function (p) { return p.net; }), [60000, -15000, -45000]);
+  t("정산 송금", s.transfers, [{ from: "현우", to: "나", amount: 45000 }, { from: "민지", to: "나", amount: 15000 }]);
+  t("환율 없는 건 제외 수", s.skipped, 1);
+  var s2 = Settle.compute([{ currency: "KRW", total: 10000, payer: "나" }], members, krw);
+  // 3333.33…×2 를 원 단위로 반올림하면 6666 — 1원 오차는 결제자 몫으로 흡수된다
+  t("3명 1만원 → 송금 2건 합 6666", s2.transfers.map(function (x) { return x.amount; }), [3333, 3333]);
+
+  // ---- 합계 검증
+  t("항목 합 = 합계", Scan.checkSum({ items: [{ amount: 500 }, { amount: 700 }], total: 1200 }).ok, true);
+  t("세금 별도", Scan.checkSum({ items: [{ amount: 1000 }], tax: 100, total: 1100 }).ok, true);
+  t("할인 반영", Scan.checkSum({ items: [{ amount: 1000 }], discount: 200, total: 800 }).ok, true);
+  t("불일치 감지", Scan.checkSum({ items: [{ amount: 1000 }], total: 1500 }).ok, false);
+
+  // ---- 인식 결과 정규화
+  var n = Scan.normalize({
+    date: "2026-11-03", time: "9:05", merchant: "ローソン", merchant_ko: "로손",
+    currency: "jpy", items: [{ name: "おにぎり", name_ko: "주먹밥", qty: "2", amount: "1,280" }],
+    tax: 0, total: "1,280", payment: "cash", category: "없는카테고리",
+  }, { type: "trip", currencies: ["JPY"] });
+  t("정규화: 통화 대문자", n.currency, "JPY");
+  t("정규화: 문자열 숫자", [n.total, n.items[0].amount, n.items[0].qty], [1280, 1280, 2]);
+  t("정규화: 시각 0패딩", n.time, "09:05");
+  t("정규화: 모르는 카테고리 → 기타", n.category, "기타");
+  t("정규화: 잘못된 통화 → 여행 첫 통화", Scan.normalize({ currency: "엔" }, { type: "trip", currencies: ["JPY"] }).currency, "JPY");
+
+  // ---- 환전 캡처 정규화
+  var ex = Scan.normalizeExchanges({ exchanges: [
+    { currency: "jpy", foreign_amount: 50000, krw_amount: 0, rate: 905, date: "2026-11-01", provider: "하나은행" }, // 100엔당 환율이 그대로 온 경우
+    { currency: "USD", foreign_amount: "300", krw_amount: "417,000", rate: 0, date: "" },
+    { currency: "JPY", foreign_amount: 0, krw_amount: 1000 },                                                   // 외화 0 → 버림
+  ] }, { type: "trip", currencies: ["JPY"] });
+  t("환전: 0건 제거", ex.rows.length, 2);
+  t("환전: 100엔당 환율 보정 후 원화 계산", [ex.rows[0].currency, ex.rows[0].krwAmount], ["JPY", 452500]);
+  t("환전: 문자열 숫자·제공처", [ex.rows[1].foreignAmount, ex.rows[1].krwAmount, ex.rows[0].memo], [300, 417000, "하나은행"]);
+  t("환전: 중복 감지", Scan.isDuplicateExchange({ currency: "JPY", foreignAmount: 30000, krwAmount: 270000, date: "" }, xs), true);
+  t("환전: 다른 금액은 중복 아님", Scan.isDuplicateExchange({ currency: "JPY", foreignAmount: 30000, krwAmount: 271000, date: "" }, xs), false);
+
+  // ---- 위치
+  var np = Scan.normalize({ address: " 大阪府大阪市中央区難波3-1-1 なんばビル5F ", map_query: "大阪市中央区難波3-1-1", city: "大阪市", country: "jp", merchant: "ローソン" }, { type: "trip", currencies: ["JPY"] });
+  t("정규화: 주소·도시·국가코드", [np.place.city, np.place.country, np.place.address.slice(0, 3)], ["大阪市", "JP", "大阪府"]);
+  var qs = Geo.queries(Object.assign({ merchant: "ローソン" }, np)).map(function (x) { return x.src + ":" + x.q; });
+  t("검색어 순서(검색어→주소→층 뗀 주소→번지 떼기→상호+도시)", qs, ["query:大阪市中央区難波3-1-1", "address:大阪府大阪市中央区難波3-1-1 なんばビル5F", "address:大阪府大阪市中央区難波3-1-1", "area:大阪府大阪市中央区難波3-1", "area:大阪府大阪市中央区難波3", "area:大阪府大阪市中央区難波", "name:ローソン 大阪市"]);
+  t("층 표시 자르기", Geo.queries({ place: { address: "서울 중구 세종대로 110 서울시청 3층" } }).map(function (x) { return x.q; }).slice(0, 2), ["서울 중구 세종대로 110 서울시청 3층", "서울 중구 세종대로 110"]);
+  t("한국 주소 번지 떼기", Geo.queries({ place: { address: "제주 서귀포시 중문관광로 72번길 75" } }).map(function (x) { return x.q; }), ["제주 서귀포시 중문관광로 72번길 75", "제주 서귀포시 중문관광로 72번길", "제주 서귀포시 중문관광로"]);
+  t("좌표 없으면 has=false", [Geo.has({}), Geo.has({ lat: null, lng: null }), Geo.has({ lat: 34.6, lng: 135.5 })], [false, false, true]);
+  t("서울–부산 직선 약 325km", Math.round(Geo.distanceKm({ lat: 37.5665, lng: 126.978 }, { lat: 35.1796, lng: 129.0756 }) / 5) * 5, 325);
+  t("EXIF 도분초 → 도(남·서는 음수)", [Geo.dms([37, 30, 0], "N"), Geo.dms([122, 15, 0], "W")], [37.5, -122.25]);
+  var dd = Geo.days([
+    { id: "c", date: "2026-11-04", time: "09:00", place: { lat: 34.70, lng: 135.50 } },
+    { id: "a", date: "2026-11-03", time: "18:00", place: { lat: 34.66, lng: 135.50 } },
+    { id: "b", date: "2026-11-03", time: "12:00", place: { lat: 34.67, lng: 135.50 } },
+    { id: "d", date: "2026-11-03", time: "", place: {} },
+  ], "2026-11-03");
+  t("날짜별 묶음·일차·시간순", dd.map(function (d) { return d.no + ":" + d.entries.map(function (e) { return e.id; }).join(""); }), ["1:bad", "2:c"]);
+  t("하루 이동거리(위치 있는 곳만)", Math.round(dd[0].km * 10) / 10, 1.1);
+  t("출발일 없으면 기록 순서로 일차", Geo.days([{ date: "2026-11-09" }, { date: "2026-11-05" }], "").map(function (d) { return d.no; }), [1, 2]);
+  var pr = TinyMap.project(34.6937, 135.5023, 12), un = TinyMap.unproject(pr.x, pr.y, 12);
+  t("지도 투영 왕복", [Math.round(un.lat * 1e4) / 1e4, Math.round(un.lng * 1e4) / 1e4], [34.6937, 135.5023]);
+  var fz = TinyMap.fitZoom([{ lat: 34.66, lng: 135.50 }, { lat: 34.70, lng: 135.50 }], 360, 320, 36, 17);
+  t("두 점(4.4km) 맞춤 확대 단계", fz.z, 12); // z13이면 세로 282px > 가용 248px
+  // EXIF가 없는 JPEG
+  t("EXIF 없는 JPEG → null", Geo.parseExifGps(new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 0, 4, 0, 0]).buffer), null);
+
+  // ---- 통계
+  var se = [
+    { date: "2026-11-01", currency: "KRW", total: 1000, category: "식비" },
+    { date: "2026-11-03", currency: "KRW", total: 3000, category: "교통" },
+    { date: "2026-11-03", currency: "KRW", total: 500, category: "식비" },
+  ];
+  t("카테고리 순위", Stats.ranked(se, function (e) { return e.category; }, krw), [{ key: "교통", value: 3000 }, { key: "식비", value: 1500 }]);
+  t("일별(빈 날 0 채움)", Stats.byDay(se, krw).map(function (d) { return d.value; }), [1000, 0, 3500]);
+
+  // ---- CSV
+  var csv = CSVX.entriesCsv(
+    { type: "trip", members: ["나", "민지"] },
+    [{ date: "2026-11-03", time: "12:00", merchant: 'Cafe "A", Osaka', merchantKo: "=카페", category: "식비", currency: "JPY", total: 1000, payMethod: "card", payer: "나", splitAmong: [], items: [{ nameKo: "커피", qty: 2, amount: 1000 }], memo: "", place: { address: "難波3-1", label: "난바", lat: 34.6655123, lng: 135.5011999 } }],
+    krw, function (e) { return FX.rateOf(e, r); }
+  );
+  t("CSV BOM", csv.charCodeAt(0), 0xfeff);
+  var row = csv.split("\r\n")[1];
+  t("CSV 따옴표·쉼표 이스케이프", row.indexOf('"Cafe ""A"", Osaka"') >= 0, true);
+  t("CSV 수식 주입 방지", row.indexOf("'=카페") >= 0, true);
+  t("CSV 원화·분담자", row.indexOf(",9100,카드,나,나/민지,") >= 0, true);
+  t("CSV 주소·좌표", row.indexOf("커피×2 1000,,難波3-1,난바,34.665512,135.5012") >= 0, true);
+
+  document.getElementById("summary").innerHTML = "<b class='" + (fail ? "fail" : "ok") + "'>" + pass + " passed, " + fail + " failed</b>";
+  document.title = (fail ? "FAIL " : "PASS ") + pass + "/" + (pass + fail);
+})();
+</script>
+</body>
+</html>

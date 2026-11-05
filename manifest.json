@@ -1,0 +1,14 @@
+{
+  "name": "영수증 여행기록",
+  "short_name": "영수증여행",
+  "description": "영수증으로 남기는 여행 발자취 — 지도·일정·경비",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f7f6f2",
+  "theme_color": "#1f6f5c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
