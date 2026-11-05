@@ -17,10 +17,13 @@
   // 붐빔(503)이면 5초·12초·25초 기다리며 모델을 번갈아 다시 보낸다(총 약 45초).
   // 2026-11 실측: 이미지 요청을 몇 초 안에 연달아 보내면 첫 번째만 200, 나머지는 503 —
   // 바로 재시도하면 계속 막히고 간격을 두면 풀린다. 진행 상황은 SC.onBusy(n, 전체, 대기ms)로 알린다.
-  var BUSY_WAITS = [5000, 12000, 25000];
+  var BUSY_WAITS = [5000, 12000, 25000, 25000];
+  var spent = {}; // 모델 → 한도 초과(429) 난 시각
+  var SPENT_MS = 30 * 60 * 1000;
   // 모델: 2026-11 실측 — 2.5-flash는 "새 사용자에겐 제공 안 함"(404),
   // 3.8-flash는 503(붐빔)이 잦고 3.5-flash는 바로 응답 → 3.5를 먼저, 붐비면 3.8로 넘어간다.
-  SC.MODELS = ["gemini-3.5-flash", "gemini-3.8-flash"];
+  // 무료 한도(429)는 모델마다 따로 계산된다(2026-11 실측: 3.5-flash 429일 때 3.5-flash-lite는 200).
+  SC.MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"];
   SC.DEFAULT_MODEL = SC.MODELS[0];
 
   SC.CATEGORIES = ["숙박", "식비", "카페·간식", "교통", "관광·입장", "쇼핑", "기념품", "기타"];
@@ -86,7 +89,7 @@
     }
     if (viaProxy) {
       // 공용 인식 서버(운영자 키) 경유 — 사용자가 고칠 수 없는 문제는 직접 입력을 안내한다
-      if (status === 429) return "지금 인식 요청이 몰려 잠시 쉬어야 합니다. 1분쯤 뒤 다시 하거나 직접 입력해 주세요. (사진은 그대로 붙어 있습니다)";
+      if (status === 429) return "오늘 쓸 수 있는 인식 횟수를 다 쓴 것 같습니다. 나중에 다시 하거나 직접 입력해 주세요. (사진은 그대로 붙어 있습니다)";
       if (status === 413) return "사진이 너무 큽니다. 다른 사진으로 시도해 주세요.";
       if (status === 451) return "인식 서버가 지금 Gemini를 쓸 수 없는 지역으로 연결됐습니다. 잠시 뒤 다시 하거나 직접 입력해 주세요. (사진은 그대로 붙어 있습니다)";
       if (status === 400 && /모델/.test(msg)) return msg;
@@ -250,8 +253,10 @@
       // 시도할 모델 순서: (내 키면 설정의 모델 →) 기본 모델 → 예비 모델. 붐비면(503) 다음 모델로 넘어간다.
       var models = [];
       (viaProxy ? [] : [s.geminiModel]).concat(SC.MODELS).forEach(function (m) {
+        if (spent[m] && Date.now() - spent[m] < SPENT_MS) return; // 방금 한도 초과(429)난 모델은 30분 건너뜀
         if (m && models.indexOf(m) < 0) models.push(m);
       });
+      if (!models.length) models = SC.MODELS.slice(); // 다 막혔으면 그래도 다시 시도
       var urlFor = function (m) {
         m = encodeURIComponent(m);
         return viaProxy
@@ -278,7 +283,7 @@
       // 생각 설정을 모르는 모델이면(400) 그 설정만 빼고 다시 보낸다
       var plainPayload = (function () { var o = JSON.parse(payload); delete o.generationConfig.thinkingConfig; return JSON.stringify(o); })();
       var plain = false;
-      // 503(붐빔)·451(지역 거절)은 BUSY_WAITS 간격으로 모델을 번갈아(3.5 → 3.8 → 3.5 → 3.8) 다시 보낸다.
+      // 붐빔·한도 초과면 BUSY_WAITS 간격으로 다음 모델(3.5 → 3.5-lite → 3.8 → …)로 넘어가며 다시 보낸다.
       function attempt(n) {
         var controller = new AbortController();
         var timer = setTimeout(function () {
@@ -292,10 +297,13 @@
         }).then(
           function (res) {
             clearTimeout(timer);
-            var busy = res.status === 503 || res.status === 451;
+            // 503 붐빔·451 지역 거절은 잠깐 기다렸다가, 429 무료 한도 초과는 기다려도 안 풀리니 바로 다음 모델로
+            var busy = res.status === 503 || res.status === 451 || res.status === 429;
+            var wait = res.status === 429 ? 0 : BUSY_WAITS[n];
+            if (res.status === 429) spent[models[n % models.length]] = Date.now();
             if (busy && n < BUSY_WAITS.length) {
-              if (SC.onBusy) SC.onBusy(n + 1, BUSY_WAITS.length, BUSY_WAITS[n]);
-              return new Promise(function (r) { setTimeout(r, BUSY_WAITS[n]); }).then(function () {
+              if (SC.onBusy && wait) SC.onBusy(n + 1, BUSY_WAITS.length, wait);
+              return new Promise(function (r) { setTimeout(r, wait); }).then(function () {
                 return attempt(n + 1);
               });
             }
