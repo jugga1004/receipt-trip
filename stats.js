@@ -84,6 +84,17 @@
     return m;
   };
 
+  // 실제로 쓴 통화별 합계를 한 줄로: "16,270 JPY + 원화 5,000원". 원화만 썼으면 빈 문자열
+  // (원화 총액 옆에 붙여 "엔으로 얼마 썼는지"를 같이 보이게 한다)
+  SS.currencyLine = function (entries) {
+    var m = SS.byCurrency(entries || []);
+    var foreign = Object.keys(m).filter(function (c) { return c !== "KRW" && m[c]; });
+    if (!foreign.length) return "";
+    var parts = foreign.map(function (c) { return FX.fmt(m[c], c); });
+    if (m.KRW) parts.push("원화 " + FX.won(m.KRW));
+    return parts.join(" + ");
+  };
+
   function ymd(d) {
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
@@ -249,6 +260,7 @@
       total: Math.round(t.total),
       missing: t.missing,
       count: entries.length,
+      currencyLine: SS.currencyLine(entries),
       days: days,
       perDay: days ? Math.round(t.total / days) : 0,
       members: members.length || 1,
@@ -268,6 +280,7 @@
     if (book.start) L.push(book.start + (book.end ? " ~ " + book.end : "") + (s.days ? " (" + s.days + "일)" : ""));
     L.push("");
     L.push("총 경비 " + FX.won(s.total) + " · " + s.count + "건");
+    if (s.currencyLine) L.push("(" + s.currencyLine + ")");
     if (s.days) L.push("하루 평균 " + FX.won(s.perDay));
     if (s.members > 1) L.push(s.members + "명 · 1인당 " + FX.won(s.perHead));
     if (s.categories.length) {

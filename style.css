@@ -421,3 +421,8 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--brand) 5
 .legs__icon { display: inline-block; width: 1.6em; }
 .legs--head { flex-basis: 100%; margin: 2px 0 0; display: flex; flex-wrap: wrap; gap: 2px 12px; }
 .legs--head li { font-size: 12px; color: var(--text-2); }
+
+/* 원화 총액 아래 통화별 합계 */
+.summary__cur { display: block; margin-top: 2px; font-size: 12px; color: var(--text-2); }
+.costsum__cur { flex-basis: 100%; font-size: 14px; color: var(--text-2); }
+.day h3 small { font-weight: 500; }

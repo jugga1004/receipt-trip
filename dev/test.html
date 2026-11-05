@@ -176,6 +176,8 @@
   t("경비: 남은 현금(JPY)", [sm.fx[0].currency, sm.fx[0].left, sm.fx[0].leftKrw], ["JPY", 47000, 427700]);
   var stxt = Stats.summaryText(sbook, sm);
   t("경비: 복사 글", [stxt.indexOf("총 경비 41,400원") > 0, stxt.indexOf("1인당 20,700원") > 0, stxt.indexOf("환율 미등록 1건") > 0], [true, true, true]);
+  t("통화별 합계 한 줄", [Stats.currencyLine(sents), Stats.currencyLine([{ currency: "KRW", total: 5000 }])], ["4,000 JPY + 100.00 THB + 원화 5,000원", ""]);
+  t("경비 복사 글에 통화별 합계", stxt.indexOf("(4,000 JPY + 100.00 THB + 원화 5,000원)") > 0, true);
 
   // ---- CSV
   var csv = CSVX.entriesCsv(

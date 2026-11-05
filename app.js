@@ -151,7 +151,7 @@
           '<span class="card__tag">' + ((b.currencies || []).length ? "해외" : "국내") + "</span>" +
           '<strong class="card__name">' + esc(b.name) + "</strong>" +
           '<span class="card__meta">' + esc((b.start || "") + (b.end ? " ~ " + b.end : "")) + ((b.currencies || []).length ? " · " + esc(b.currencies.join(", ")) : "") + "</span>" +
-          '<span class="card__sum">' + FX.won(tt.total) + " · 발자취 " + places + "곳" + (tt.missing ? " · 환율 미등록 " + tt.missing + "건" : "") + "</span></a>";
+          '<span class="card__sum">' + FX.won(tt.total) + (Stats.currencyLine(ents) ? ' <small class="muted">(' + esc(Stats.currencyLine(ents)) + ")</small>" : "") + " · 발자취 " + places + "곳" + (tt.missing ? " · 환율 미등록 " + tt.missing + "건" : "") + "</span></a>";
       });
       html += "</div>";
       $app.innerHTML = html;
@@ -385,6 +385,11 @@
   function placeName(e) {
     return e.merchantKo || e.merchant || (e.place && e.place.label) || "(이름 없음)";
   }
+  // 요약 칸의 원화 총액 아래에 붙는 통화별 합계 한 줄
+  function curSub(ents) {
+    var line = Stats.currencyLine(ents);
+    return line ? '<span class="summary__cur">' + esc(line) + "</span>" : "";
+  }
   function needsLocate(e) {
     var p = e.place || {};
     return !Geo.has(p) && !!(p.query || p.address || p.city);
@@ -403,7 +408,7 @@
     var km = state.day === "all" ? Geo.pathKm(located.map(function (e) { return e.place; })) : shown[0] ? shown[0].km : 0;
 
     var html = warnRates();
-    html += '<div class="summary"><div><small>' + (state.day === "all" ? "총 지출" : "이날 지출") + "</small><strong>" + FX.won(t.total) + "</strong></div>" +
+    html += '<div class="summary"><div><small>' + (state.day === "all" ? "총 지출" : "이날 지출") + "</small><strong>" + FX.won(t.total) + "</strong>" + curSub(ents) + "</div>" +
       "<div><small>발자취</small><strong>" + located.length + "곳</strong></div>" +
       "<div><small>이동(직선)</small><strong>" + (km >= 10 ? Math.round(km) : km.toFixed(1)) + "km</strong></div></div>";
 
@@ -433,7 +438,7 @@
     html += '<div class="days">';
     shown.forEach(function (d) {
       var dt = Stats.total(d.entries, f);
-      html += '<section class="day"><h3><span>' + esc(dayLabel(d)) + "</span><span>" + FX.won(dt.total) +
+      html += '<section class="day"><h3><span>' + esc(dayLabel(d)) + "</span><span>" + FX.won(dt.total) + (Stats.currencyLine(d.entries) ? ' <small class="muted">(' + esc(Stats.currencyLine(d.entries)) + ")</small>" : "") +
         (d.located > 1 ? ' <small class="muted">· ' + (d.km >= 10 ? Math.round(d.km) : d.km.toFixed(1)) + "km</small>" : "") + "</span></h3><ol class=\"trail\">";
       var seq = 0;
       d.entries.forEach(function (e) {
@@ -534,6 +539,7 @@
     lastSummaryText = Stats.summaryText(b, sm);
     html += '<section class="panel costsum"><h2>여행 경비 정리</h2>' +
       '<div class="costsum__total"><small>총 경비</small><strong>' + FX.won(sm.total) + "</strong>" +
+      (sm.currencyLine ? '<span class="costsum__cur">' + esc(sm.currencyLine) + "</span>" : "") +
       '<span class="muted">' + sm.count + "건" + (sm.days ? " · " + sm.days + "일" : "") + "</span></div>" +
       '<div class="summary costsum__kpi">' +
       (sm.days ? "<div><small>하루 평균</small><strong>" + FX.won(sm.perDay) + "</strong></div>" : "") +
