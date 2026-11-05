@@ -423,6 +423,7 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--brand) 5
 .legs--head li { font-size: 12px; color: var(--text-2); }
 
 /* 원화 총액 아래 통화별 합계 */
-.summary__cur { display: block; margin-top: 2px; font-size: 12px; color: var(--text-2); }
+.money__ref { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; color: var(--text-2); }
+.card__sum .money__ref, .day h3 .money__ref { display: inline; margin: 0; }
 .costsum__cur { flex-basis: 100%; font-size: 14px; color: var(--text-2); }
 .day h3 small { font-weight: 500; }

@@ -279,8 +279,8 @@
     L.push("[" + book.name + "] 여행 경비 정리");
     if (book.start) L.push(book.start + (book.end ? " ~ " + book.end : "") + (s.days ? " (" + s.days + "일)" : ""));
     L.push("");
-    L.push("총 경비 " + FX.won(s.total) + " · " + s.count + "건");
-    if (s.currencyLine) L.push("(" + s.currencyLine + ")");
+    L.push("총 경비 " + (s.currencyLine || FX.won(s.total)) + " · " + s.count + "건");
+    if (s.currencyLine) L.push("(원화 환산 ≈ " + FX.won(s.total) + ")");
     if (s.days) L.push("하루 평균 " + FX.won(s.perDay));
     if (s.members > 1) L.push(s.members + "명 · 1인당 " + FX.won(s.perHead));
     if (s.categories.length) {
