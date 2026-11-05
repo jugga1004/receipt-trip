@@ -170,9 +170,9 @@
     $app.innerHTML =
       '<a class="back" href="' + (isEdit ? "#/book/" + b.id + "/manage" : "#/") + '">← 돌아가기</a>' +
       "<h1>" + (isEdit ? "여행 정보 수정" : "새 여행") + "</h1>" +
-      '<section class="panel"><h2>예약 캡처로 채우기</h2>' +
-      '<p class="hint" style="margin:0 0 10px">항공·기차·버스·배·렌터카·숙소 예약 화면이나 확인 메일을 올리면 여행지·기간·외화·이름을 채웁니다. 여러 장을 한 번에 올려도 됩니다. 예약 없이 차로 가는 여행은 아래에 직접 입력하세요.</p>' +
-      '<button type="button" class="btn btn--primary btn--block" id="legShot">예약 캡처 올리기</button>' +
+      '<section class="panel"><h2>여행 일정 올리기</h2>' +
+      '<p class="hint" style="margin:0 0 10px">항공·기차·버스·배·렌터카·숙소 예약 내역을 올리면 여행지·기간·외화·이름을 채웁니다. 여러 장을 한 번에 올려도 됩니다. 예약 없이 차로 가는 여행은 아래에 직접 입력하세요.</p>' +
+      '<button type="button" class="btn btn--primary btn--block" id="legShot">여행 일정 올리기</button>' +
       '<input type="file" id="legFile" accept="image/*" multiple hidden>' +
       '<div id="legBox"></div></section>' +
       '<form id="bookForm" class="form">' +
@@ -598,9 +598,9 @@
     html += "</section>";
 
     html +=
-      '<section class="panel"><h2>캡처로 등록</h2>' +
-      '<p class="hint" style="margin:0 0 10px">은행 앱 환전 완료 화면, 트래블카드 충전 내역, 환전 영수증을 찍거나 캡처해서 올리면 자동으로 채웁니다. 한 장에 여러 건이 있어도 됩니다.</p>' +
-      '<button type="button" class="btn btn--primary btn--block" id="fxShot">환전 캡처 올리기</button>' +
+      '<section class="panel"><h2>환전 내역 올리기</h2>' +
+      '<p class="hint" style="margin:0 0 10px">은행 앱 환전 완료 화면, 트래블카드 충전 내역, 환전 영수증을 올리면 자동으로 채웁니다. 한 장에 여러 건이 있어도 됩니다.</p>' +
+      '<button type="button" class="btn btn--primary btn--block" id="fxShot">환전 내역 올리기</button>' +
       '<div id="fxReview"></div></section>';
 
     html +=

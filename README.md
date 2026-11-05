@@ -64,7 +64,9 @@ bash dev/bundle.sh dev/test.html dev/_test_bundle.html  # → 로직 테스트 5
 GitHub `jugga1004`에 Public 저장소 `receipt-trip` → 이 폴더 파일 업로드(`dev/_*.html` 제외) → Settings → Pages(main, /root).
 주소 `https://jugga1004.github.io/receipt-trip/`. `index.html`에 `noindex` 메타 포함. 카메라·위치·서비스워커는 https에서만 동작.
 
-### 공용 인식 서버 (운영자 키로 모두가 쓰기)
+### 공용 인식 서버 (운영자 키로 모두가 쓰기) — 현재 Vercel `api/gemini.js`
+2026-11: Cloudflare Worker는 미국에서 실행(cf-placement: remote-OMA)해도 Gemini가 "User location is not supported"로 거절해 Vercel(iad1)로 옮겼다. 주소 `https://receipt-trip-jugga1004s-projects.vercel.app`, 키는 Vercel 환경 변수 `GEMINI_KEY`, 배포 보호(Vercel Authentication)는 꺼 둬야 앱이 부를 수 있다. 아래 Cloudflare 절차는 기록용.
+
 공개 저장소 코드에 키를 넣으면 누구나 볼 수 있으므로, 키는 Cloudflare Worker(`proxy/worker.js`)에만 둔다.
 앱은 `config.js`의 `proxyUrl`로 요청하고, 사용자가 설정에 자기 키를 넣으면 그 키로 직접 부른다.
 

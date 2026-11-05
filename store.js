@@ -155,7 +155,7 @@
   // ------------------------------------------------------------ 설정(키)
   // API 키는 작은 문자열이라 localStorage. 접근 자체가 막힌 환경이면 메모리.
 
-  var DEFAULTS = { geminiKey: "", geminiModel: "gemini-3.8-flash" };
+  var DEFAULTS = { geminiKey: "", geminiModel: "gemini-3.5-flash" };
 
   S.settings = function () {
     var raw = null;
