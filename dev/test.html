@@ -75,6 +75,13 @@
   // 3333.33…×2 를 원 단위로 반올림하면 6666 — 1원 오차는 결제자 몫으로 흡수된다
   t("3명 1만원 → 송금 2건 합 6666", s2.transfers.map(function (x) { return x.amount; }), [3333, 3333]);
 
+  // ---- 사진 줄이기(긴 영수증)
+  var sz = function (w, h) { var k = Scan.scaleFor(w, h); return [Math.round(w * k), Math.round(h * k)]; };
+  t("보통 사진은 긴 쪽 1600", sz(3024, 4032), [1200, 1600]);
+  t("긴 영수증은 폭 1000 남김", sz(1000, 6000).concat(sz(1500, 6000)), [667, 4000, 1000, 4000].slice(0, 2).concat([1000, 4000]));
+  t("작은 사진은 키우지 않음", sz(800, 1200), [800, 1200]);
+  t("세로 3:1 폰 캡처", sz(1080, 3240), [1000, 3000]);
+
   // ---- 합계 검증
   t("항목 합 = 합계", Scan.checkSum({ items: [{ amount: 500 }, { amount: 700 }], total: 1200 }).ok, true);
   t("세금 별도", Scan.checkSum({ items: [{ amount: 1000 }], tax: 100, total: 1100 }).ok, true);

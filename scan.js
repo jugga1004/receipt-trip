@@ -14,6 +14,10 @@
   var SC = {};
   var TIMEOUT_MS = 90000;
   var MAX_SIDE = 1600;
+  // 세로로 긴 영수증: 긴 쪽 1600px로 줄이면 폭이 300~400px까지 좁아져 글씨가 뭉개진다.
+  // 길쭉한 사진(세로:가로 2:1 이상)은 짧은 쪽을 1000px까지 남기고, 긴 쪽은 4000px을 넘지 않게 한다.
+  var MIN_SHORT = 1000;
+  var MAX_LONG = 4000;
   // 붐빔(503)이면 5초·12초·25초 기다리며 모델을 번갈아 다시 보낸다(총 약 45초).
   // 2026-11 실측: 이미지 요청을 몇 초 안에 연달아 보내면 첫 번째만 200, 나머지는 503 —
   // 바로 재시도하면 계속 막히고 간격을 두면 풀린다. 진행 상황은 SC.onBusy(n, 전체, 대기ms)로 알린다.
@@ -29,6 +33,13 @@
   SC.CATEGORIES = ["숙박", "식비", "카페·간식", "교통", "관광·입장", "쇼핑", "기념품", "기타"];
 
   // ---------------------------------------------------------- 사진 압축
+  SC.scaleFor = function (w, h) {
+    var long = Math.max(w, h);
+    var short = Math.min(w, h);
+    var k = Math.min(1, MAX_SIDE / long);
+    if (long / short >= 2) k = Math.min(1, MAX_LONG / long, Math.max(k, MIN_SHORT / short));
+    return k;
+  };
   // 폰 사진(4~12MB)을 그대로 저장·전송하면 IndexedDB도 무료 한도도 금방 닳는다.
   // 긴 변 1600px JPEG면 영수증 글씨는 충분히 읽힌다. EXIF 회전은 <img>가 알아서 반영한다.
   SC.compress = function (file) {
@@ -38,7 +49,7 @@
       img.onload = function () {
         var w = img.naturalWidth;
         var h = img.naturalHeight;
-        var k = Math.min(1, MAX_SIDE / Math.max(w, h));
+        var k = SC.scaleFor(w, h);
         var c = document.createElement("canvas");
         c.width = Math.round(w * k);
         c.height = Math.round(h * k);
@@ -128,6 +139,7 @@
       "- 금액은 모두 숫자(천 단위 구분기호·통화기호 없이). 소수점 통화는 소수점 유지.",
       "- items는 구매한 품목만. 소계·합계·세금·거스름돈·포인트·결제수단 줄은 넣지 않는다. amount는 그 품목 줄의 최종 금액(수량 반영).",
       "- name은 원문, name_ko는 자연스러운 한국어 번역(음식은 무엇인지 알 수 있게, 예: '唐揚げ' → '가라아게(닭튀김)').",
+      "- 항목이 15개를 넘는 긴 영수증이면 name은 원문 앞부분 20자까지만, name_ko는 2~5단어로 짧게 쓴다(괄호 설명 생략). 금액·수량은 빠짐없이.",
       "- total은 실제로 지불한 최종 금액(세금 포함, 할인 반영). tax는 별도 표기된 세금 합(내세 포함이면 표기된 세액), 없으면 0. discount는 할인 합의 절댓값, 없으면 0.",
       "- payment: 현금이면 cash, 카드/전자결제면 card, 모르면 unknown.",
       "- category는 다음 중 하나: " + cats.join(", ") + ".",
