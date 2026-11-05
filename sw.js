@@ -20,6 +20,7 @@ var APP_SHELL = [
   "./",
   "./index.html",
   "./style.css",
+  "./config.js",
   "./store.js",
   "./fx.js",
   "./geo.js",

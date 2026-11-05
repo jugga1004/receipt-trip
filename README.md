@@ -46,6 +46,7 @@ OpenStreetMap **Nominatim**으로 좌표를 찾는다. 앞에서 찾으면 멈�
 - `geo.js` 지오코딩·EXIF GPS·거리·날짜별 묶음 / `map.js` 타일 지도
 - `fx.js` 환율·남은 현금 / `settle.js` 정산 / `stats.js` 집계·차트 / `csv.js` CSV·JSON 백업
 - `app.js` 해시 라우팅 화면 / `sw.js` 네트워크 우선 서비스워커(외부 오리진은 캐시 안 함)
+- `config.js` 공용 인식 서버 주소(비밀값 아님) / `proxy/worker.js` Cloudflare 중계 서버
 
 ## 개인정보
 - 사진은 인식할 때만 Google Gemini로 전송(무료 키는 학습에 쓰일 수 있음 — 설정 화면에 고지)
@@ -60,8 +61,27 @@ bash dev/bundle.sh dev/test.html dev/_test_bundle.html  # → 로직 테스트 5
 미리보기 창은 file:// HTML을 data: 스냅샷으로 띄워 외부 script·해시 이동이 안 되므로 번들을 연다(IndexedDB도 막혀 메모리 모드).
 
 ## 배포
-GitHub `jugga1004`에 새 Public 저장소 → 이 폴더 파일 업로드(`dev/_*.html` 제외) → Settings → Pages(main, /root).
-`index.html`에 `noindex` 메타 포함. 카메라·위치·서비스워커는 https에서만 동작.
+GitHub `jugga1004`에 Public 저장소 `receipt-trip` → 이 폴더 파일 업로드(`dev/_*.html` 제외) → Settings → Pages(main, /root).
+주소 `https://jugga1004.github.io/receipt-trip/`. `index.html`에 `noindex` 메타 포함. 카메라·위치·서비스워커는 https에서만 동작.
+
+### 공용 인식 서버 (운영자 키로 모두가 쓰기)
+공개 저장소 코드에 키를 넣으면 누구나 볼 수 있으므로, 키는 Cloudflare Worker(`proxy/worker.js`)에만 둔다.
+앱은 `config.js`의 `proxyUrl`로 요청하고, 사용자가 설정에 자기 키를 넣으면 그 키로 직접 부른다.
+
+1. Cloudflare 가입 → **Workers & Pages → Create → Worker**(Hello World로 시작) → 이름 예: `receipt-trip` → Deploy
+2. **Edit code** → 기존 코드를 지우고 `proxy/worker.js` 내용을 붙여넣기 → Deploy
+3. 그 Worker의 **Settings → Variables and Secrets → Add** → Type `Secret`, Name `GEMINI_KEY`, Value에 Gemini 키 → Deploy
+4. 나온 주소`https://receipt-trip.jugga1004.workers.dev` — `config.js`에 이미 들어 있다(Worker 이름을 다르게 지으면 여기를 고친다)
+
+**실행 지역 고정(필수)**: 무료 요금제는 한국 사용자를 홍콩(HKG) 데이터센터로 보내고, Gemini는 홍콩발 요청을
+"User location is not supported"로 거절한다(2026-11 실측, 3회 연속). `proxy/wrangler.toml`의 `placement.region = "gcp:us-central1"`로
+미국에서 실행되게 한다. 대시보드에는 리전 지정이 없으므로(Smart만 있음) Worker 설정 → 빌드 → **Git 저장소 연결**
+(저장소 `receipt-trip`, 루트 디렉터리 `proxy`)로 이 파일을 써서 배포한다. 앱은 이 경우를 451로 받아 두 번까지 다시 시도한다.
+
+막아 둔 것: `jugga1004.github.io`에서 온 요청만, flash 계열 모델만, 4MB 이하, IP당 분당 15회(대략).
+Origin은 브라우저 밖에선 꾸밀 수 있으므로 **Google 쪽 하루 요청 상한도 같이 걸어 둘 것**(Google Cloud 콘솔 → Generative Language API → 할당량).
+무료 키면 모든 사용자가 무료 한도를 나눠 쓰고, 보낸 영수증은 Google이 학습에 쓸 수 있다(설정 화면에 고지).
+결제를 켠 키면 사용량만큼 요금이 운영자에게 나온다.
 
 ## 다음 후보
 - 영수증 없는 장소(관광지·숙소) 핀 추가, 사진 일기·메모, 여행 공유용 요약 이미지

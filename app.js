@@ -133,8 +133,8 @@
         return (b.createdAt || "").localeCompare(a.createdAt || "");
       });
       var html = '<section class="hero"><h1>영수증이 여행 일기가 됩니다.</h1><p>여행 중 받은 영수증을 찍어 올리면 날짜·가게·금액을 정리하고, 영수증의 주소로 지도에 핀을 찍어 하루하루 다닌 길을 남깁니다. 해외 영수증은 번역하고, 내가 환전한 환율로 원화를 계산합니다.</p></section>';
-      if (!Store.hasKey()) {
-        html += '<div class="banner">영수증 자동 인식을 쓰려면 <a href="#/settings">설정</a>에서 Gemini API 키를 넣어 주세요. 키 없이도 직접 입력은 됩니다.</div>';
+      if (!Store.canScan()) {
+        html += '<div class="banner">영수증 자동 인식을 쓰려면 <a href="#/settings">설정</a>에서 Gemini API 키를 넣어 주세요. 키 없이도 직접 입력과 지도 핀 찍기는 됩니다.</div>';
       }
       html += '<div class="section-head"><h2>내 여행</h2><a class="btn btn--primary" href="#/new">+ 새 여행</a></div>';
       if (!books.length) {
@@ -567,7 +567,7 @@
         });
       });
       document.getElementById("fxShot").onclick = function () {
-        if (!Store.hasKey()) return toast("설정에서 Gemini API 키를 먼저 넣어 주세요.", 4000);
+        if (!Store.canScan()) return toast("설정에서 Gemini API 키를 먼저 넣어 주세요.", 4000);
         document.getElementById("fileFx").click();
       };
       renderFxReview();
@@ -1154,7 +1154,7 @@
     var show = function (blob) {
       var u = objUrl(blob);
       col.innerHTML = '<button type="button" class="photo" aria-label="사진 크게 보기"><img src="' + u + '" alt="영수증 사진"></button>' +
-        (Store.hasKey() && state.draft === e ? '<button type="button" class="btn btn--ghost btn--sm btn--block" id="rescan">다시 인식</button>' : "");
+        (Store.canScan() && state.draft === e ? '<button type="button" class="btn btn--ghost btn--sm btn--block" id="rescan">다시 인식</button>' : "");
       col.querySelector(".photo").onclick = function () { openViewer(u); };
       var rs = document.getElementById("rescan");
       if (rs) rs.onclick = function () { startScan(e); };
@@ -1220,7 +1220,7 @@
         delete e._file;
         if (state.draft !== e) return;
         renderPhoto(e);
-        if (!Store.hasKey()) {
+        if (!Store.canScan()) {
           if (e._gps && !Geo.has(e.place)) setPlace(e, { lat: e._gps.lat, lng: e._gps.lng, src: "photo", label: "사진 찍은 곳" });
           setScanBox('자동 인식을 쓰려면 <a href="#/settings">설정</a>에서 Gemini API 키를 넣어 주세요. 지금은 직접 입력해 주세요.' +
             (e._gps ? " 위치는 사진 GPS로 찍었습니다." : ""));
@@ -1259,20 +1259,31 @@
   // ============================================================ 설정
   function viewSettings() {
     var s = Store.settings();
+    var proxy = !!Store.proxyUrl();
+    var keyForm =
+      '<form id="keyForm" class="form">' +
+      '<label class="field"><span>Gemini API 키' + (proxy ? " (선택)" : "") + '</span><input name="key" type="password" autocomplete="off" value="' + esc(s.geminiKey) + '" placeholder="AIza…"></label>' +
+      '<label class="field"><span>모델</span><input name="model" value="' + esc(s.geminiModel) + '"></label>' +
+      '<button class="btn btn--primary btn--block">저장</button></form>' +
+      '<p class="hint">키는 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>에서 무료로 만들 수 있습니다. 키는 이 기기에만 저장됩니다.</p>';
     $app.innerHTML =
       '<a class="back" href="#/">← 돌아가기</a><h1>설정</h1>' +
       '<section class="panel"><h2>영수증 자동 인식 (Google Gemini)</h2>' +
-      '<form id="keyForm" class="form">' +
-      '<label class="field"><span>Gemini API 키</span><input name="key" type="password" autocomplete="off" value="' + esc(s.geminiKey) + '" placeholder="AIza…"></label>' +
-      '<label class="field"><span>모델</span><input name="model" value="' + esc(s.geminiModel) + '"></label>' +
-      '<button class="btn btn--primary btn--block">저장</button></form>' +
-      '<p class="hint">키는 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>에서 무료로 만들 수 있습니다. 키는 이 기기에만 저장됩니다.</p>' +
+      (proxy
+        ? '<p class="banner banner--ok" style="margin:0 0 10px">키 없이 바로 쓸 수 있습니다. 공용 인식 서버로 처리합니다.</p>' +
+          '<details' + (s.geminiKey ? " open" : "") + '><summary>내 Gemini 키로 쓰기 (선택)</summary>' +
+          '<p class="hint">공용 서버가 붐빌 때 내 키를 넣으면 그 키로 직접 인식합니다. 비우면 다시 공용 서버를 씁니다.</p>' + keyForm + "</details>"
+        : keyForm) +
       '<div class="notice"><b>개인정보 안내</b><ul>' +
-      "<li>자동 인식을 누르면 영수증 사진이 Google Gemini로 전송됩니다. 그 외 기록·사진은 이 기기 밖으로 나가지 않습니다.</li>" +
+      (proxy
+        ? "<li>자동 인식을 하면 영수증 사진이 <b>운영자의 중계 서버(Cloudflare)를 거쳐</b> Google Gemini로 전송됩니다. 중계 서버는 내용을 저장하지 않고 그대로 넘깁니다.</li>"
+        : "<li>자동 인식을 하면 영수증 사진이 Google Gemini로 전송됩니다.</li>") +
+      "<li>그 외 기록·사진은 이 기기 밖으로 나가지 않습니다.</li>" +
       "<li>무료 키로 보낸 내용은 Google이 서비스 개선(학습)에 쓸 수 있습니다. 민감한 영수증은 직접 입력을 권장합니다.</li>" +
       "<li>카드번호·승인번호·전화번호는 추출하지 않도록 요청하지만, 사진 자체에는 남아 있습니다.</li>" +
       "<li>위치를 찾을 때 영수증의 <b>가게 주소·상호</b>(사진은 아님)가 OpenStreetMap 검색(Nominatim)으로 전송됩니다. 지도 그림도 OpenStreetMap에서 받아옵니다.</li>" +
       "<li>\"지금 내 위치\" 버튼을 누를 때만 기기 위치를 묻습니다.</li>" +
+      "<li>이 앱은 AI(Claude)의 도움을 받아 만들었습니다.</li>" +
       "</ul></div></section>" +
       '<section class="panel"><h2>백업 · 복원</h2>' +
       '<p class="hint">기록은 이 브라우저에만 있습니다. 브라우저 데이터를 지우거나 폰을 바꾸면 사라지니 가끔 백업해 두세요.</p>' +
@@ -1283,7 +1294,7 @@
 
     document.getElementById("keyForm").addEventListener("submit", function (ev) {
       ev.preventDefault();
-      Store.saveSettings({ geminiKey: this.key.value.trim(), geminiModel: this.model.value.trim() || "gemini-2.5-flash" });
+      Store.saveSettings({ geminiKey: this.key.value.trim(), geminiModel: this.model.value.trim() || Scan.DEFAULT_MODEL });
       toast("저장했습니다.");
     });
     var bk = function (withPhotos) {

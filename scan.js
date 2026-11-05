@@ -14,6 +14,9 @@
   var SC = {};
   var TIMEOUT_MS = 90000;
   var MAX_SIDE = 1600;
+  var RETRY_503 = 2;
+  // 기본 모델. 2026-11 실측: gemini-2.5-flash는 "새 사용자에겐 더 이상 제공 안 함"(404) → 3.8-flash
+  SC.DEFAULT_MODEL = "gemini-3.8-flash";
 
   SC.CATEGORIES = ["숙박", "식비", "카페·간식", "교통", "관광·입장", "쇼핑", "기념품", "기타"];
 
@@ -68,7 +71,7 @@
   SC.blobToBase64 = blobToBase64;
 
   // ------------------------------------------------------------- 에러 안내
-  function friendlyError(status, body) {
+  function friendlyError(status, body, viaProxy) {
     var msg = "";
     try {
       var j = JSON.parse(body);
@@ -76,12 +79,25 @@
     } catch (e) {
       msg = String(body || "").slice(0, 160);
     }
+    if (viaProxy) {
+      // 공용 인식 서버(운영자 키) 경유 — 사용자가 고칠 수 없는 문제는 직접 입력을 안내한다
+      if (status === 429) return "지금 인식 요청이 몰려 잠시 쉬어야 합니다. 1분쯤 뒤 다시 하거나 직접 입력해 주세요. (사진은 그대로 붙어 있습니다)";
+      if (status === 413) return "사진이 너무 큽니다. 다른 사진으로 시도해 주세요.";
+      if (status === 451) return "인식 서버가 지금 Gemini를 쓸 수 없는 지역으로 연결됐습니다. 잠시 뒤 다시 하거나 직접 입력해 주세요. (사진은 그대로 붙어 있습니다)";
+      if (status === 400 && /모델/.test(msg)) return msg;
+      if (status === 400 && /API key|API_KEY/i.test(msg)) return "공용 인식 서버 설정에 문제가 있습니다. 운영자에게 알려 주세요. 지금은 직접 입력해 주세요.";
+      if (status === 401 || status === 403) return "공용 인식 서버가 요청을 거부했습니다(" + status + "). 운영자에게 알려 주세요.";
+      if (status === 503) return "Gemini가 지금 붐벼서 응답하지 못했습니다. 몇 분 뒤 다시 하거나 직접 입력해 주세요. (사진은 그대로 붙어 있습니다)";
+      if (status >= 500) return "인식 서버 쪽 문제입니다(" + status + "). 잠시 뒤 다시 시도해 주세요.";
+      return "인식 요청이 실패했습니다(" + status + "). " + msg;
+    }
     if (status === 400 && /API key not valid|API_KEY_INVALID/i.test(msg)) {
       return "API 키가 올바르지 않습니다. 설정에서 키를 다시 확인해 주세요.";
     }
     if (status === 401 || status === 403) return "키가 거부됐습니다(" + status + "). 키가 만료됐거나 권한이 없습니다.";
     if (status === 429) return "무료 사용량을 다 썼습니다. 잠시 뒤 다시 하거나 직접 입력해 주세요. (사진은 그대로 붙어 있습니다)";
     if (status === 404) return "그 모델을 찾을 수 없습니다. 설정에서 모델 이름을 확인해 주세요.";
+    if (status === 503) return "Gemini가 지금 붐벼서 응답하지 못했습니다. 몇 분 뒤 다시 하거나 직접 입력해 주세요. (사진은 그대로 붙어 있습니다)";
     if (status >= 500) return "Gemini 서버 쪽 문제입니다(" + status + "). 잠시 뒤 다시 시도해 주세요.";
     return "인식 요청이 실패했습니다(" + status + "). " + msg;
   }
@@ -218,67 +234,82 @@
 
   // ------------------------------------------------------------- 공통 호출
   // 사진 1장 + 프롬프트 + 스키마 → 파싱된 JSON. 영수증·환전 캡처가 같이 쓴다.
+  // 내 키가 있으면 Gemini로 직접, 없으면 운영자 중계 서버(config.js의 proxyUrl, proxy/worker.js)로.
+  // 중계 서버는 flash 계열 모델만 받는다.
   function callVision(blob, prompt, respSchema) {
     var s = Store.settings();
-    if (!s.geminiKey) return Promise.reject(new Error("설정에서 Gemini API 키를 먼저 넣어 주세요."));
+    var proxy = Store.proxyUrl();
+    if (!s.geminiKey && !proxy) return Promise.reject(new Error("설정에서 Gemini API 키를 먼저 넣어 주세요."));
+    var viaProxy = !s.geminiKey;
     return blobToBase64(blob).then(function (b64) {
-      var url =
-        "https://generativelanguage.googleapis.com/v1beta/models/" +
-        encodeURIComponent(s.geminiModel || "gemini-2.5-flash") +
-        ":generateContent?key=" +
-        encodeURIComponent(s.geminiKey);
-      var controller = new AbortController();
-      var timer = setTimeout(function () {
-        controller.abort();
-      }, TIMEOUT_MS);
-      return fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ inline_data: { mime_type: blob.type || "image/jpeg", data: b64 } }, { text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            responseMimeType: "application/json",
-            responseSchema: respSchema,
-            maxOutputTokens: 8192,
+      var model = encodeURIComponent((viaProxy ? "" : s.geminiModel) || SC.DEFAULT_MODEL);
+      var url = viaProxy
+        ? proxy + "/models/" + model + ":generateContent"
+        : "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + encodeURIComponent(s.geminiKey);
+      var payload = JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ inline_data: { mime_type: blob.type || "image/jpeg", data: b64 } }, { text: prompt }],
           },
-        }),
-      }).then(
-        function (res) {
-          clearTimeout(timer);
-          return res.text().then(function (body) {
-            if (!res.ok) throw new Error(friendlyError(res.status, body));
-            var data = JSON.parse(body);
-            var cand = data.candidates && data.candidates[0];
-            if (!cand) throw new Error("응답이 비어 있습니다. 다시 시도하거나 직접 입력해 주세요.");
-            var text = ((cand.content && cand.content.parts) || [])
-              .map(function (p) {
-                return p.text || "";
-              })
-              .join("");
-            if (!text) {
-              if (cand.finishReason === "MAX_TOKENS") throw new Error("내용이 너무 길어 응답이 잘렸습니다. 직접 입력해 주세요.");
-              throw new Error("인식 결과가 비어 있습니다(" + (cand.finishReason || "?") + ").");
-            }
-            try {
-              return JSON.parse(text);
-            } catch (e) {
-              throw new Error("인식 결과를 해석하지 못했습니다. 다시 시도해 주세요.");
-            }
-          });
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: "application/json",
+          responseSchema: respSchema,
+          maxOutputTokens: 8192,
         },
-        function (e) {
-          clearTimeout(timer);
-          if (e.name === "AbortError") throw new Error("응답이 너무 늦습니다(90초). 네트워크를 확인하고 다시 시도해 주세요.");
-          throw new Error("Gemini에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.");
-        }
-      );
+      });
+      // 503(모델이 붐빔)·451(중계 서버가 Gemini 불가 지역에서 실행됨)은 잠깐 뒤 풀리는 일이 많아
+      // 3초·6초 뒤 두 번까지 다시 보낸다.
+      // (2026-11 실측: gemini-3.8-flash가 연달아 503 "high demand")
+      function attempt(n) {
+        var controller = new AbortController();
+        var timer = setTimeout(function () {
+          controller.abort();
+        }, TIMEOUT_MS);
+        return fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: payload,
+        }).then(
+          function (res) {
+            clearTimeout(timer);
+            if ((res.status === 503 || res.status === 451) && n < RETRY_503) {
+              return new Promise(function (r) { setTimeout(r, 3000 * (n + 1)); }).then(function () {
+                return attempt(n + 1);
+              });
+            }
+            return res.text().then(function (body) {
+              if (!res.ok) throw new Error(friendlyError(res.status, body, viaProxy));
+              var data = JSON.parse(body);
+              var cand = data.candidates && data.candidates[0];
+              if (!cand) throw new Error("응답이 비어 있습니다. 다시 시도하거나 직접 입력해 주세요.");
+              var text = ((cand.content && cand.content.parts) || [])
+                .map(function (p) {
+                  return p.text || "";
+                })
+                .join("");
+              if (!text) {
+                if (cand.finishReason === "MAX_TOKENS") throw new Error("내용이 너무 길어 응답이 잘렸습니다. 직접 입력해 주세요.");
+                throw new Error("인식 결과가 비어 있습니다(" + (cand.finishReason || "?") + ").");
+              }
+              try {
+                return JSON.parse(text);
+              } catch (e) {
+                throw new Error("인식 결과를 해석하지 못했습니다. 다시 시도해 주세요.");
+              }
+            });
+          },
+          function (e) {
+            clearTimeout(timer);
+            if (e.name === "AbortError") throw new Error("응답이 너무 늦습니다(90초). 네트워크를 확인하고 다시 시도해 주세요.");
+            throw new Error(viaProxy ? "인식 서버에 연결하지 못했습니다. 인터넷 연결을 확인하거나 잠시 뒤 다시 시도해 주세요." : "Gemini에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.");
+          }
+        );
+      }
+      return attempt(0);
     });
   }
 

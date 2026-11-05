@@ -155,7 +155,7 @@
   // ------------------------------------------------------------ 설정(키)
   // API 키는 작은 문자열이라 localStorage. 접근 자체가 막힌 환경이면 메모리.
 
-  var DEFAULTS = { geminiKey: "", geminiModel: "gemini-2.5-flash" };
+  var DEFAULTS = { geminiKey: "", geminiModel: "gemini-3.8-flash" };
 
   S.settings = function () {
     var raw = null;
@@ -184,6 +184,15 @@
 
   S.hasKey = function () {
     return !!S.settings().geminiKey;
+  };
+  // 운영자 중계 서버 주소(config.js). 끝의 / 는 뗀다.
+  S.proxyUrl = function () {
+    var c = global.APP_CONFIG || {};
+    return String(c.proxyUrl || "").replace(/\/+$/, "");
+  };
+  // 자동 인식을 쓸 수 있나: 내 키가 있거나, 운영자 중계 서버가 설정돼 있거나
+  S.canScan = function () {
+    return S.hasKey() || !!S.proxyUrl();
   };
 
   global.Store = S;
