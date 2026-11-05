@@ -270,8 +270,14 @@
           responseMimeType: "application/json",
           responseSchema: respSchema,
           maxOutputTokens: 8192,
+          // 영수증 판독은 깊이 생각할 일이 아니다. 2026-11 실측(3.5-flash, 같은 사진):
+          //   기본 8.1초(생각 토큰 628) → thinkingLevel low 2.3초(생각 토큰 0), 결과 동일
+          thinkingConfig: { thinkingLevel: "low" },
         },
       });
+      // 생각 설정을 모르는 모델이면(400) 그 설정만 빼고 다시 보낸다
+      var plainPayload = (function () { var o = JSON.parse(payload); delete o.generationConfig.thinkingConfig; return JSON.stringify(o); })();
+      var plain = false;
       // 503(붐빔)·451(지역 거절)은 BUSY_WAITS 간격으로 모델을 번갈아(3.5 → 3.8 → 3.5 → 3.8) 다시 보낸다.
       function attempt(n) {
         var controller = new AbortController();
@@ -282,7 +288,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-          body: payload,
+          body: plain ? plainPayload : payload,
         }).then(
           function (res) {
             clearTimeout(timer);
@@ -294,6 +300,10 @@
               });
             }
             return res.text().then(function (body) {
+              if (res.status === 400 && !plain && /thinking/i.test(body)) {
+                plain = true;
+                return attempt(n);
+              }
               if (!res.ok) throw new Error(friendlyError(res.status, body, viaProxy));
               var data = JSON.parse(body);
               var cand = data.candidates && data.candidates[0];
