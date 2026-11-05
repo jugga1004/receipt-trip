@@ -194,5 +194,113 @@
     });
   };
 
+  // ---------------------------------------------------------------------
+  // 여행 경비 정리 — 경비 탭 맨 위 요약 + 메신저에 붙여 넣을 글
+  // ---------------------------------------------------------------------
+  // krwFn(e): 원화 환산(환율 미등록이면 null). 일행 1인당은 정산(Settle)의 "부담액" 기준이라
+  // 분담자를 고른 건까지 반영된다.
+  SS.summary = function (book, entries, exchanges, krwFn) {
+    entries = entries || [];
+    exchanges = exchanges || [];
+    var t = SS.total(entries, krwFn);
+    var dates = {};
+    entries.forEach(function (e) { if (e.date) dates[e.date] = 1; });
+    var days = Object.keys(dates).length;
+    if (book.start && book.end && book.end >= book.start) {
+      days = Math.round((new Date(book.end + "T00:00:00") - new Date(book.start + "T00:00:00")) / 86400000) + 1;
+    }
+    var cats = SS.ranked(entries, function (e) { return e.category; }, krwFn).map(function (c) {
+      return { key: c.key, value: Math.round(c.value), pct: t.total ? Math.round((c.value / t.total) * 100) : 0 };
+    });
+    var pay = { card: 0, cash: 0, unknown: 0 };
+    var cur = {};
+    var biggest = null;
+    entries.forEach(function (e) {
+      var k = krwFn(e);
+      var c = e.currency || "KRW";
+      cur[c] = cur[c] || { foreign: 0, krw: 0, missing: 0 };
+      cur[c].foreign += e.total || 0;
+      if (k == null) { cur[c].missing++; return; }
+      cur[c].krw += k;
+      pay[e.payMethod === "card" ? "card" : e.payMethod === "cash" ? "cash" : "unknown"] += k;
+      if (!biggest || k > biggest.krw) biggest = { name: e.merchantKo || e.merchant || "(이름 없음)", krw: Math.round(k), date: e.date };
+    });
+    Object.keys(cur).forEach(function (c) {
+      cur[c].krw = Math.round(cur[c].krw);
+      cur[c].foreign = Math.round(cur[c].foreign * 100) / 100;
+    });
+    Object.keys(pay).forEach(function (k) { pay[k] = Math.round(pay[k]); });
+
+    // 환전: 낸 원화 합 + 남은 현금(외화)과 그 원화 가치(가중평균 환율)
+    var rates = FX.rates(exchanges);
+    var left = FX.cashLeft(exchanges, entries);
+    var fx = Object.keys(left).map(function (c) {
+      var paid = exchanges.filter(function (x) { return x.currency === c; }).reduce(function (a, x) { return a + (x.krwAmount || 0); }, 0);
+      var r = rates[c] ? rates[c].rate : null;
+      return { currency: c, exchanged: left[c].exchanged, krwPaid: paid, left: left[c].left, leftKrw: r != null ? Math.round(left[c].left * r) : null };
+    });
+
+    var members = (book.members || []).filter(Boolean);
+    var perPerson = null;
+    if (members.length > 1 && global.Settle) {
+      perPerson = Settle.compute(entries, members, krwFn).people.map(function (p) { return { name: p.name, owed: p.owed, paid: p.paid }; });
+    }
+    return {
+      total: Math.round(t.total),
+      missing: t.missing,
+      count: entries.length,
+      days: days,
+      perDay: days ? Math.round(t.total / days) : 0,
+      members: members.length || 1,
+      perHead: Math.round(t.total / (members.length || 1)),
+      perPerson: perPerson,
+      categories: cats,
+      pay: pay,
+      currencies: cur,
+      fx: fx,
+      biggest: biggest,
+    };
+  };
+
+  SS.summaryText = function (book, s) {
+    var L = [];
+    L.push("[" + book.name + "] 여행 경비 정리");
+    if (book.start) L.push(book.start + (book.end ? " ~ " + book.end : "") + (s.days ? " (" + s.days + "일)" : ""));
+    L.push("");
+    L.push("총 경비 " + FX.won(s.total) + " · " + s.count + "건");
+    if (s.days) L.push("하루 평균 " + FX.won(s.perDay));
+    if (s.members > 1) L.push(s.members + "명 · 1인당 " + FX.won(s.perHead));
+    if (s.categories.length) {
+      L.push("");
+      L.push("항목별");
+      s.categories.forEach(function (c) { L.push("· " + c.key + " " + FX.won(c.value) + " (" + c.pct + "%)"); });
+    }
+    var payParts = [];
+    if (s.pay.card) payParts.push("카드 " + FX.won(s.pay.card));
+    if (s.pay.cash) payParts.push("현금 " + FX.won(s.pay.cash));
+    if (s.pay.unknown) payParts.push("모름 " + FX.won(s.pay.unknown));
+    if (payParts.length) L.push("", "결제 " + payParts.join(" / "));
+    var foreign = Object.keys(s.currencies).filter(function (c) { return c !== "KRW"; });
+    if (foreign.length) {
+      L.push("");
+      L.push("통화별");
+      Object.keys(s.currencies).forEach(function (c) {
+        var v = s.currencies[c];
+        L.push("· " + (c === "KRW" ? FX.won(v.foreign) : FX.fmt(v.foreign, c) + " ≈ " + FX.won(v.krw)));
+      });
+    }
+    s.fx.forEach(function (f) {
+      L.push("환전 " + FX.fmt(f.exchanged, f.currency) + " (" + FX.won(f.krwPaid) + ") · 남은 현금 약 " + FX.fmt(f.left, f.currency) + (f.leftKrw != null ? " ≈ " + FX.won(f.leftKrw) : ""));
+    });
+    if (s.perPerson) {
+      L.push("");
+      L.push("사람별 부담");
+      s.perPerson.forEach(function (p) { L.push("· " + p.name + " " + FX.won(p.owed) + " (낸 돈 " + FX.won(p.paid) + ")"); });
+    }
+    if (s.biggest) L.push("", "가장 큰 지출: " + s.biggest.name + " " + FX.won(s.biggest.krw));
+    if (s.missing) L.push("", "※ 환율 미등록 " + s.missing + "건은 합계에서 빠짐");
+    return L.join("\n");
+  };
+
   global.Stats = SS;
 })(this);

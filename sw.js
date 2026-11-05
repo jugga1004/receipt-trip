@@ -15,7 +15,7 @@
 //
 // 참고: 서비스워커는 https 또는 localhost에서만 등록된다. index.html을 file://로 열면
 // 등록이 안 되지만, app.js가 그 경우를 건너뛰도록 처리해두어서 앱 자체는 정상 동작한다.
-var CACHE_NAME = "receipt-book-v2";
+var CACHE_NAME = "receipt-book-v3";
 var APP_SHELL = [
   "./",
   "./index.html",
@@ -76,7 +76,10 @@ self.addEventListener("fetch", function (event) {
   if (event.request.method !== "GET") return;
 
   event.respondWith(
-    fetch(event.request)
+    // cache: "no-cache" — 네트워크 우선이어도 브라우저 HTTP 캐시(GitHub Pages는 10분)를 그대로 쓰면
+    // 배포 직후 옛 파일을 받는다(2026-11 실측: index.html은 새것, store.js는 옛것이 섞여 오류).
+    // no-cache는 서버에 바뀌었는지만 물어 바뀐 게 없으면 304로 가볍게 끝난다.
+    fetch(event.request, { cache: "no-cache" })
       .then(function (response) {
         // 성공한 응답만 캐시에 넣는다. 404나 오류 페이지를 캐시하면
         // 오프라인일 때 그 오류가 되살아난다.

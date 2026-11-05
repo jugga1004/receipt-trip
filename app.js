@@ -210,7 +210,7 @@
 
   // ============================================================ 가계부
   function tabsFor(book) {
-    var t = [["list", "발자취"], ["stats", "통계"]];
+    var t = [["list", "발자취"], ["stats", "경비"]];
     if ((book.currencies || []).length || state.exchanges.length) t.push(["fx", "환전"]);
     if ((book.members || []).length > 1) t.push(["settle", "정산"]);
     t.push(["manage", "관리"]);
@@ -416,7 +416,30 @@
     var ents = state.entries;
     var t = Stats.total(ents, f);
     var html = warnRates();
-    html += '<div class="summary"><div><small>합계</small><strong>' + FX.won(t.total) + "</strong></div><div><small>건수</small><strong>" + ents.length + "건</strong></div></div>";
+    var sm = Stats.summary(b, ents, state.exchanges, f);
+    lastSummaryText = Stats.summaryText(b, sm);
+    html += '<section class="panel costsum"><h2>여행 경비 정리</h2>' +
+      '<div class="costsum__total"><small>총 경비</small><strong>' + FX.won(sm.total) + "</strong>" +
+      '<span class="muted">' + sm.count + "건" + (sm.days ? " · " + sm.days + "일" : "") + "</span></div>" +
+      '<div class="summary costsum__kpi">' +
+      (sm.days ? "<div><small>하루 평균</small><strong>" + FX.won(sm.perDay) + "</strong></div>" : "") +
+      (sm.members > 1 ? "<div><small>1인당(" + sm.members + "명)</small><strong>" + FX.won(sm.perHead) + "</strong></div>" : "") +
+      "<div><small>카드</small><strong>" + FX.won(sm.pay.card) + "</strong></div>" +
+      "<div><small>현금" + (sm.pay.unknown ? "·모름" : "") + "</small><strong>" + FX.won(sm.pay.cash + sm.pay.unknown) + "</strong></div>" +
+      "</div>";
+    if (sm.fx.length) {
+      html += '<ul class="kv">' + sm.fx.map(function (x) {
+        return "<li><span>" + x.currency + " 환전 " + FX.fmt(x.exchanged, x.currency) + " (" + FX.won(x.krwPaid) + ")</span><b>남은 현금 " + FX.fmt(x.left, x.currency) +
+          (x.leftKrw != null ? ' <small class="muted">≈ ' + FX.won(x.leftKrw) + "</small>" : "") + "</b></li>";
+      }).join("") + "</ul>";
+    }
+    if (sm.perPerson) {
+      html += '<h3 class="sub">사람별 부담</h3><ul class="kv">' + sm.perPerson.map(function (p) {
+        return "<li><span>" + esc(p.name) + ' <small class="muted">낸 돈 ' + FX.won(p.paid) + "</small></span><b>" + FX.won(p.owed) + "</b></li>";
+      }).join("") + "</ul>";
+    }
+    if (sm.biggest) html += '<p class="hint">가장 큰 지출: ' + esc(sm.biggest.name) + " " + FX.won(sm.biggest.krw) + "</p>";
+    html += '<button type="button" class="btn btn--primary btn--block" id="copySummary">경비 정리 복사 (메신저에 붙여 넣기)</button></section>';
 
     var cat = Stats.ranked(ents, function (e) { return e.category; }, f);
     html += '<section class="panel"><h2>카테고리별</h2>' + Stats.rankBars(cat, t.total) + "</section>";
@@ -491,6 +514,7 @@
 
   // ------------------------------------------------------------ 정산
   var lastSettleText = "";
+  var lastSummaryText = "";
   function tabSettle() {
     var b = state.book;
     var res = Settle.compute(state.entries, b.members, krwFn());
@@ -548,7 +572,10 @@
         go("#/entry/" + b.id + "/new");
       };
     }
-    if (tab === "stats") Stats.wireTips($app);
+    if (tab === "stats") {
+      Stats.wireTips($app);
+      document.getElementById("copySummary").onclick = function () { copyText(lastSummaryText); };
+    }
     if (tab === "fx") {
       var form = document.getElementById("fxForm");
       var prev = document.getElementById("fxPreview");

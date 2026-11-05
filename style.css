@@ -398,3 +398,11 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--brand) 5
   background: var(--surface-2); color: var(--text); cursor: pointer;
 }
 .place__btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* ---------------------------------------------------------------- 경비 정리 */
+.costsum__total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 10px; }
+.costsum__total small { flex-basis: 100%; color: var(--muted); }
+.costsum__total strong { font-size: 30px; letter-spacing: -0.03em; }
+.costsum__kpi { background: var(--surface-2); border: 0; margin-bottom: 10px; }
+.costsum .kv { margin-bottom: 8px; }
+.costsum .btn { margin-top: 8px; }
