@@ -27,7 +27,8 @@
   // 모델: 2026-11 실측 — 2.5-flash는 "새 사용자에겐 제공 안 함"(404),
   // 3.8-flash는 503(붐빔)이 잦고 3.5-flash는 바로 응답 → 3.5를 먼저, 붐비면 3.8로 넘어간다.
   // 무료 한도(429)는 모델마다 따로 계산된다(2026-11 실측: 3.5-flash 429일 때 3.5-flash-lite는 200).
-  SC.MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"];
+  // 사용자 요청(2026-11-06): 가벼운 3.5-flash-lite를 먼저 — 빠르고 한도가 따로라 덜 막힌다. 막히면 3.5 → 3.8.
+  SC.MODELS = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash"];
   SC.DEFAULT_MODEL = SC.MODELS[0];
 
   SC.CATEGORIES = ["숙박", "식비", "카페·간식", "교통", "관광·입장", "쇼핑", "기념품", "기타"];
