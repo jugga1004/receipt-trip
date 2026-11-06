@@ -67,6 +67,21 @@
   t("신용카드·모름 따로 집계", [wl.JPY.credit, wl.JPY.unknown], [2000, 1000]);
   t("결제수단 읽기(예전 card → 트래블카드)", [FX.payKind("card"), FX.payKind("credit"), FX.payKind("x")], ["travel", "credit", ""]);
 
+  // ---- 트래블카드 → 현금 인출
+  var wx = [
+    { currency: "JPY", foreignAmount: 50000, krwAmount: 455000 },              // 트래블카드 충전
+    { currency: "JPY", foreignAmount: 10000, krwAmount: 0, kind: "withdraw", to: "cash", fee: 110 }, // ATM 인출
+  ];
+  var wl2 = FX.wallets(wx, [
+    { currency: "JPY", total: 3000, payMethod: "cash" },
+    { currency: "JPY", total: 110, payMethod: "travel" },  // ATM 수수료 지출
+  ]);
+  t("인출: 트래블카드 −, 현금 +", [wl2.JPY.travel.left, wl2.JPY.cash.left, wl2.JPY.withdrawn], [39890, 7000, 10000]);
+  t("인출은 환율 계산에서 빠짐", FX.rates(wx).JPY.rate, 9.1);
+  var wn = Scan.normalizeExchanges({ exchanges: [{ currency: "JPY", foreign_amount: 10000, krw_amount: 0, rate: 9.1, kind: "atm_withdraw", fee: 110, provider: "트래블월렛" }] }, { currencies: ["JPY"] });
+  t("인출 인식 정리(원화 0·수수료)", [wn.rows[0].kind, wn.rows[0].krwAmount, wn.rows[0].fee, wn.rows[0].to], ["withdraw", 0, 110, "cash"]);
+  t("인출과 충전은 같은 금액이어도 중복 아님", Scan.isDuplicateExchange(wn.rows[0], [{ currency: "JPY", foreignAmount: 10000, krwAmount: 0, date: "" }]), false);
+
   // ---- 정산
   var members = ["나", "민지", "현우"];
   var krw = function (e) { return FX.krw(e, r); };

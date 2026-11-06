@@ -598,6 +598,26 @@
   }
 
   // ------------------------------------------------------------ 환전
+  // 트래블카드 → 현금 인출 저장. 수수료가 있으면 "ATM 인출 수수료" 지출(트래블카드 결제)도 만들고 서로 연결한다.
+  function saveWithdraw(book, base, fee) {
+    var x = Object.assign({}, base, { kind: "withdraw", to: "cash", krwAmount: 0, fee: fee > 0 ? fee : 0 });
+    var feeEntry = !(fee > 0) ? Promise.resolve(null) : Store.put("entries", {
+      bookId: book.id, date: base.date, time: "", merchant: "ATM", merchantKo: "ATM 인출 수수료", currency: base.currency,
+      items: [], tax: 0, discount: 0, total: fee, category: "기타", payMethod: "travel",
+      payer: (book.members || ["나"])[0], splitAmong: [], memo: "인출 " + FX.fmt(base.foreignAmount, base.currency),
+    });
+    return feeEntry.then(function (en) {
+      if (en) x.feeEntryId = en.id;
+      return Store.put("exchanges", x);
+    });
+  }
+
+  // 지갑 내역 한 줄: 트래블카드 "충전 A − 인출 W − 사용 B", 현금 "환전 A + 인출 W − 사용 B"
+  function walletBreak(k, x, wd, c) {
+    if (k === "travel") return "충전 " + FX.fmt(x.in, c) + (wd ? " − 인출 " + FX.fmt(wd, c) : "") + " − 사용 " + FX.fmt(x.out - wd, c);
+    return (x.in - wd ? "환전 " + FX.fmt(x.in - wd, c) : "") + (wd ? (x.in - wd ? " + " : "") + "인출 " + FX.fmt(wd, c) : "") + " − 사용 " + FX.fmt(x.out, c);
+  }
+
   function tabFx() {
     var b = state.book;
     var rates = FX.rates(state.exchanges);
@@ -617,7 +637,7 @@
           html += '<div class="wallet"><small>' + FX.WALLET[k] + " · " + c + "</small>" +
             "<strong" + (x.left < 0 ? ' class="neg"' : "") + ">" + FX.fmt(x.left, c) + "</strong>" +
             (r != null ? '<small class="money__ref">≈ ' + FX.won(Math.round(x.left * r)) + "</small>" : "") +
-            '<small class="muted">' + (k === "travel" ? "충전 " : "환전 ") + FX.fmt(x.in, c) + " − 사용 " + FX.fmt(x.out, c) + "</small></div>";
+            '<small class="muted">' + walletBreak(k, x, w.withdrawn || 0, c) + "</small></div>";
         });
         html += "</div>";
         if (w.credit) html += '<p class="hint">신용카드로 낸 ' + FX.fmt(w.credit, c) + "는 환전 잔액에서 빼지 않았습니다(원화로 따로 청구).</p>";
@@ -643,11 +663,13 @@
       '<section class="panel"><h2>직접 추가</h2><form id="fxForm" class="form">' +
       '<fieldset class="field"><legend>어디로</legend><div class="chips">' +
       '<label class="chip"><input type="radio" name="to" value="travel" checked><span>트래블카드 충전</span></label>' +
-      '<label class="chip"><input type="radio" name="to" value="cash"><span>현금 환전</span></label></div></fieldset>' +
+      '<label class="chip"><input type="radio" name="to" value="cash"><span>현금 환전</span></label>' +
+      '<label class="chip"><input type="radio" name="to" value="withdraw"><span>트래블카드 → 현금 인출</span></label></div></fieldset>' +
       '<div class="row2"><label class="field"><span>통화</span><select name="currency">' + curOptions(b.currencies || [], (b.currencies || [])[0]) + "</select></label>" +
       '<label class="field"><span>날짜</span><input type="date" name="date" value="' + today() + '"></label></div>' +
-      '<div class="row2"><label class="field"><span>받은 외화</span><input name="foreign" inputmode="decimal" placeholder="30000" required></label>' +
-      '<label class="field"><span>낸 원화</span><input name="krw" inputmode="numeric" placeholder="273000" required></label></div>' +
+      '<div class="row2"><label class="field"><span id="fxFoLabel">받은 외화</span><input name="foreign" inputmode="decimal" placeholder="30000" required></label>' +
+      '<label class="field" id="fxKrwBox"><span>낸 원화</span><input name="krw" inputmode="numeric" placeholder="273000"></label>' +
+      '<label class="field" id="fxFeeBox" hidden><span>ATM 수수료(외화)</span><input name="fee" inputmode="decimal" placeholder="없으면 비움"></label></div>' +
       '<p class="hint" id="fxPreview">수수료·우대율이 반영된 실제 금액을 넣으세요.</p>' +
       '<label class="field"><span>메모</span><input name="memo" placeholder="예: 트래블월렛, 공항 환전소"></label>' +
       '<button class="btn btn--primary btn--block">추가</button></form></section>';
@@ -656,6 +678,11 @@
     if (xs.length) {
       html += '<section class="panel"><h2>환전 내역</h2><ul class="xlist">' +
         xs.map(function (x) {
+          if (FX.isWithdraw(x)) {
+            return '<li><span><span class="tag">인출</span> <b>' + FX.fmt(x.foreignAmount, x.currency) + "</b> 트래블카드 → 현금" +
+              '<small class="muted">' + esc(x.date || "") + (x.fee ? " · 수수료 " + FX.fmt(x.fee, x.currency) : "") + (x.memo ? " · " + esc(x.memo) : "") + "</small></span>" +
+              '<span class="xlist__btns"><button type="button" class="btn btn--ghost btn--sm" data-delx="' + x.id + '">삭제</button></span></li>';
+          }
           return '<li><span><span class="tag">' + FX.WALLET[FX.walletOf(x)] + "</span> <b>" + FX.fmt(x.foreignAmount, x.currency) + "</b> ← " + FX.won(x.krwAmount) +
             '<small class="muted">' + esc(x.date || "") + " · " + FX.fmtRate(x.krwAmount / x.foreignAmount, x.currency) + (x.memo ? " · " + esc(x.memo) : "") + "</small></span>" +
             '<span class="xlist__btns"><button type="button" class="btn btn--ghost btn--sm" data-swapx="' + x.id + '">' + (FX.walletOf(x) === "cash" ? "트래블카드로" : "현금으로") + "</button>" +
@@ -739,9 +766,27 @@
         var kr = num(form.krw.value);
         if (fo > 0 && kr > 0) prev.textContent = "이번 환전 환율: " + FX.fmtRate(kr / fo, form.currency.value);
       });
+      // "인출"을 고르면 낸 원화 칸 대신 ATM 수수료 칸
+      var syncFxForm = function () {
+        var wd = (form.querySelector("input[name=to]:checked") || {}).value === "withdraw";
+        document.getElementById("fxKrwBox").hidden = wd;
+        document.getElementById("fxFeeBox").hidden = !wd;
+        document.getElementById("fxFoLabel").textContent = wd ? "인출한 외화" : "받은 외화";
+        prev.textContent = wd ? "트래블카드 잔액에서 빼서 현금 잔액으로 옮깁니다. 환율 계산에는 들어가지 않습니다." : "수수료·우대율이 반영된 실제 금액을 넣으세요.";
+      };
+      form.addEventListener("change", function (ev) { if (ev.target.name === "to") syncFxForm(); });
       form.addEventListener("submit", function (ev) {
         ev.preventDefault();
-        var x = { bookId: b.id, currency: form.currency.value, date: form.date.value, foreignAmount: num(form.foreign.value), krwAmount: num(form.krw.value), memo: form.memo.value.trim(), to: (form.querySelector("input[name=to]:checked") || {}).value === "cash" ? "cash" : "travel" };
+        var to = (form.querySelector("input[name=to]:checked") || {}).value;
+        var base = { bookId: b.id, currency: form.currency.value, date: form.date.value, foreignAmount: num(form.foreign.value), memo: form.memo.value.trim() };
+        if (to === "withdraw") {
+          if (!(base.foreignAmount > 0)) return toast("인출한 외화 금액을 넣어 주세요.");
+          return saveWithdraw(b, base, num(form.fee.value)).then(function () {
+            toast("인출을 기록했습니다. 트래블카드 → 현금으로 옮겼습니다.");
+            route();
+          });
+        }
+        var x = Object.assign(base, { krwAmount: num(form.krw.value), to: to === "cash" ? "cash" : "travel" });
         if (!(x.foreignAmount > 0) || !(x.krwAmount > 0)) return toast("외화와 원화 금액을 모두 넣어 주세요.");
         Store.put("exchanges", x).then(function () {
           toast("환전 기록을 추가했습니다.");
@@ -765,7 +810,10 @@
       $app.querySelectorAll("[data-delx]").forEach(function (btn) {
         btn.onclick = function () {
           if (!confirm("이 환전 기록을 지울까요? 원화 환산이 다시 계산됩니다.")) return;
-          Store.del("exchanges", btn.getAttribute("data-delx")).then(route);
+          var id = btn.getAttribute("data-delx");
+          var x = state.exchanges.filter(function (y) { return y.id === id; })[0];
+          // 인출을 지우면 함께 만든 ATM 수수료 지출도 지운다
+          Promise.all([Store.del("exchanges", id), x && x.feeEntryId ? Store.del("entries", x.feeEntryId) : null]).then(route);
         };
       });
     }
@@ -814,7 +862,7 @@
             else if (r.note) shot.msgs.push("AI 메모: " + r.note);
             r.rows.forEach(function (row) {
               row.dup = Scan.isDuplicateExchange(row, state.exchanges.concat(shot.rows));
-              row.on = !row.dup && row.krwAmount > 0;
+              row.on = !row.dup && (row.krwAmount > 0 || row.kind === "withdraw");
               if (!row.date) row.date = today();
               shot.rows.push(row);
             });
@@ -843,7 +891,7 @@
     if (shot.rows.length) {
       html += '<p class="hint">숫자를 캡처와 한 번 비교하고, 등록할 건만 체크하세요. 원화가 0인 건은 낸 원화를 채워야 등록됩니다.</p><div class="fxrows">';
       shot.rows.forEach(function (r, i) {
-        var rate = r.foreignAmount > 0 && r.krwAmount > 0 ? FX.fmtRate(r.krwAmount / r.foreignAmount, r.currency) : "원화를 넣어 주세요";
+        var rate = r.kind === "withdraw" ? "트래블카드 잔액에서 현금 잔액으로 옮깁니다(환율 계산 제외)." : r.foreignAmount > 0 && r.krwAmount > 0 ? FX.fmtRate(r.krwAmount / r.foreignAmount, r.currency) : "원화를 넣어 주세요";
         var extra = b.currencies.indexOf(r.currency) < 0 ? '<span class="tag tag--warn">이 여행 통화 아님</span>' : "";
         html +=
           '<div class="fxrow' + (r.on ? "" : " is-off") + '" data-i="' + i + '">' +
@@ -856,7 +904,12 @@
           "</div>" +
           '<div class="row2"><label class="field"><span>날짜</span><input type="date" data-f="date" value="' + esc(r.date) + '"></label>' +
           '<label class="field"><span>메모</span><input data-f="memo" value="' + esc(r.memo) + '"></label></div>' +
-          '<label class="field"><span>어디로</span><select data-f="to"><option value="travel"' + (r.to !== "cash" ? " selected" : "") + '>트래블카드 충전</option><option value="cash"' + (r.to === "cash" ? " selected" : "") + ">현금 환전</option></select></label>" +
+          '<label class="field"><span>어디로</span><select data-f="to">' +
+          [["travel", "트래블카드 충전"], ["cash", "현금 환전"], ["withdraw", "트래블카드 → 현금 인출"]].map(function (o) {
+            var cur = r.kind === "withdraw" ? "withdraw" : r.to === "cash" ? "cash" : "travel";
+            return '<option value="' + o[0] + '"' + (cur === o[0] ? " selected" : "") + ">" + o[1] + "</option>";
+          }).join("") + "</select></label>" +
+          (r.kind === "withdraw" ? '<label class="field"><span>ATM 수수료(외화)</span><input data-f="fee" inputmode="decimal" value="' + (r.fee || "") + '"></label>' : "") +
           '<p class="hint fxrow__rate">' + rate + "</p></div>";
       });
       var n = shot.rows.filter(function (r) { return r.on; }).length;
@@ -875,9 +928,14 @@
       var f = ev.target.getAttribute("data-f");
       if (!f) return;
       if (f === "on") r.on = ev.target.checked;
-      else if (f === "foreignAmount" || f === "krwAmount") r[f] = num(ev.target.value);
+      else if (f === "foreignAmount" || f === "krwAmount" || f === "fee") r[f] = num(ev.target.value);
+      else if (f === "to") {
+        r.kind = ev.target.value === "withdraw" ? "withdraw" : "";
+        r.to = ev.target.value === "travel" ? "travel" : "cash";
+        if (r.kind) r.krwAmount = 0;
+      }
       else r[f] = ev.target.value.trim();
-      if (f !== "on" && r.foreignAmount > 0 && r.krwAmount > 0 && !r.dup) r.on = true;
+      if (f !== "on" && r.foreignAmount > 0 && (r.krwAmount > 0 || r.kind === "withdraw") && !r.dup) r.on = true;
       if (rerender) renderFxReview();
     }
     var cancel = document.getElementById("fxCancel");
@@ -886,11 +944,12 @@
     if (save) {
       save.onclick = function () {
         var pick = shot.rows.filter(function (r) { return r.on; });
-        var bad = pick.filter(function (r) { return !(r.foreignAmount > 0) || !(r.krwAmount > 0); });
+        var bad = pick.filter(function (r) { return !(r.foreignAmount > 0) || (r.kind !== "withdraw" && !(r.krwAmount > 0)); });
         if (bad.length) return toast("외화와 원화 금액이 모두 있어야 등록됩니다.", 4000);
         var addCur = [];
         Promise.all(pick.map(function (r) {
           if (b.currencies.indexOf(r.currency) < 0 && addCur.indexOf(r.currency) < 0) addCur.push(r.currency);
+          if (r.kind === "withdraw") return saveWithdraw(b, { bookId: b.id, currency: r.currency, foreignAmount: r.foreignAmount, date: r.date, memo: r.memo }, r.fee);
           return Store.put("exchanges", { bookId: b.id, currency: r.currency, foreignAmount: r.foreignAmount, krwAmount: r.krwAmount, date: r.date, memo: r.memo, to: r.to === "cash" ? "cash" : "travel" });
         }))
           .then(function () {

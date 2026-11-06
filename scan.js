@@ -374,7 +374,7 @@
   function exPrompt(book) {
     return [
       "너는 환전 기록 판독기다. 사진은 은행·환전 앱의 환전 완료 화면, 트래블카드(트래블월렛·트래블로그 등) 충전/환전 내역, 또는 환전 영수증이다.",
-      "외화를 산(환전·충전한) 거래만 exchanges 배열에 한 건씩 넣는다. 결제·출금·재환전(외화→원화 매도)·수수료 단독 줄은 넣지 않는다.",
+      "외화를 산(환전·충전한) 거래와, 트래블카드에서 현지 ATM으로 현금을 뽑은(출금·인출) 거래를 exchanges 배열에 한 건씩 넣는다. 가게 결제·재환전(외화→원화 매도)·수수료 단독 줄은 넣지 않는다.",
       "이 여행의 통화 후보: " + (book.currencies || []).join(", ") + ". 오늘 날짜는 " + new Date().toISOString().slice(0, 10) + ".",
       "규칙:",
       "- currency: 받은 외화의 ISO 4217 코드.",
@@ -383,7 +383,8 @@
       "- rate: 외화 1단위당 원화 환율. 화면이 '100엔당 905원'처럼 100단위면 9.05로 바꾼다. 없으면 0.",
       "- date: YYYY-MM-DD. 없으면 빈 문자열.",
       "- provider: 은행·서비스 이름(예: 하나은행, 트래블월렛). 모르면 빈 문자열.",
-      "- kind: 트래블카드·외화 체크카드·외화통장 충전(트래블월렛, 트래블로그, 토스 외화통장 등)이면 travel_card, 은행 창구·환전소에서 현금으로 받았으면 cash, 모르면 unknown.",
+      "- kind: 트래블카드·외화 체크카드·외화통장 충전(트래블월렛, 트래블로그, 토스 외화통장 등)이면 travel_card, 은행 창구·환전소에서 현금으로 받았으면 cash, 트래블카드로 현지 ATM에서 현금을 뽑았으면 atm_withdraw, 모르면 unknown.",
+      "- atm_withdraw일 때: foreign_amount = 뽑은 외화, krw_amount = 0, fee = 화면에 ATM 수수료가 외화로 따로 나오면 그 금액(없으면 0).",
       "- 계좌번호, 카드번호, 이름, 전화번호 같은 개인정보는 어디에도 적지 않는다.",
       "- note: 환전 기록이 아니거나 확신이 없는 부분이 있으면 한국어 한 문장. 없으면 빈 문자열.",
     ].join("\n");
@@ -403,7 +404,8 @@
             krw_amount: { type: "NUMBER" },
             rate: { type: "NUMBER" },
             provider: { type: "STRING" },
-            kind: { type: "STRING", enum: ["travel_card", "cash", "unknown"] },
+            kind: { type: "STRING", enum: ["travel_card", "cash", "atm_withdraw", "unknown"] },
+            fee: { type: "NUMBER" },
           },
           required: ["currency", "foreign_amount", "krw_amount"],
         },
@@ -426,14 +428,17 @@
       var rate = Math.abs(num(x.rate));
       var h = RATE_HINT[cur];
       if (h && rate > h[1] * 50 && rate / 100 <= h[1]) rate = rate / 100; // 100단위 환율이 그대로 온 경우
-      if (!kr && fo && rate) kr = Math.round(fo * rate);
+      if (x.kind === "atm_withdraw") kr = 0; // 인출은 원화를 새로 낸 게 아니다
+      else if (!kr && fo && rate) kr = Math.round(fo * rate);
       return {
         currency: cur,
         foreignAmount: fo,
         krwAmount: Math.round(kr),
         date: /^\d{4}-\d{2}-\d{2}$/.test(x.date || "") ? x.date : "",
         memo: String(x.provider || "").trim(),
-        to: x.kind === "cash" ? "cash" : "travel", // 모르면 트래블카드(요즘 대부분)
+        to: x.kind === "cash" || x.kind === "atm_withdraw" ? "cash" : "travel", // 모르면 트래블카드(요즘 대부분)
+        kind: x.kind === "atm_withdraw" ? "withdraw" : "",
+        fee: x.kind === "atm_withdraw" ? Math.abs(num(x.fee)) : 0,
       };
     });
     return {
@@ -451,7 +456,8 @@
       return (
         x.currency === row.currency &&
         Math.abs(x.foreignAmount - row.foreignAmount) < 0.01 &&
-        Math.abs(x.krwAmount - row.krwAmount) < 1 &&
+        (x.kind === "withdraw") === (row.kind === "withdraw") &&
+        Math.abs((x.krwAmount || 0) - (row.krwAmount || 0)) < 1 &&
         (!x.date || !row.date || x.date === row.date)
       );
     });

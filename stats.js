@@ -247,11 +247,11 @@
     var wal = FX.wallets(exchanges, entries);
     var fx = Object.keys(wal).map(function (c) {
       var w = wal[c];
-      var paid = exchanges.filter(function (x) { return x.currency === c; }).reduce(function (a, x) { return a + (x.krwAmount || 0); }, 0);
+      var paid = exchanges.filter(function (x) { return x.currency === c && !FX.isWithdraw(x); }).reduce(function (a, x) { return a + (x.krwAmount || 0); }, 0);
       var r = rates[c] ? rates[c].rate : null;
       var left = Math.round((w.travel.left + w.cash.left) * 100) / 100;
       return {
-        currency: c, exchanged: w.travel.in + w.cash.in, krwPaid: paid,
+        currency: c, exchanged: w.travel.in + w.cash.in - (w.withdrawn || 0), krwPaid: paid,
         travelLeft: w.travel.in || w.travel.out ? w.travel.left : null,
         cashLeft: w.cash.in || w.cash.out ? w.cash.left : null,
         left: left, leftKrw: r != null ? Math.round(left * r) : null,

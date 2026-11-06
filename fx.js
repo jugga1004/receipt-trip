@@ -16,7 +16,8 @@
     var acc = {};
     (exchanges || []).forEach(function (x) {
       var c = x.currency;
-      if (!c || !(x.foreignAmount > 0) || !(x.krwAmount > 0)) return;
+      // 인출(트래블카드→현금)은 새로 산 외화가 아니라 지갑 이동이라 환율 계산에서 뺀다
+      if (!c || x.kind === "withdraw" || !(x.foreignAmount > 0) || !(x.krwAmount > 0)) return;
       acc[c] = acc[c] || { foreign: 0, krw: 0, count: 0 };
       acc[c].foreign += x.foreignAmount;
       acc[c].krw += x.krwAmount;
@@ -64,6 +65,10 @@
   };
   // 환전 기록이 어디로 갔나: travel(트래블카드 충전) | cash(현금 환전). 예전 기록(값 없음)은 트래블카드.
   FX.WALLET = { travel: "트래블카드", cash: "현금" };
+  // kind: "withdraw" = 트래블카드에서 현금 인출(트래블카드 −, 현금 +). 원화를 새로 낸 게 아님
+  FX.isWithdraw = function (x) {
+    return !!x && x.kind === "withdraw";
+  };
   FX.walletOf = function (x) {
     return x && x.to === "cash" ? "cash" : "travel";
   };
@@ -78,7 +83,14 @@
     };
     (exchanges || []).forEach(function (x) {
       if (!x.currency) return;
-      cell(x.currency)[FX.walletOf(x)].in += x.foreignAmount || 0;
+      var c = cell(x.currency);
+      if (FX.isWithdraw(x)) {
+        c.travel.out += x.foreignAmount || 0;
+        c.cash.in += x.foreignAmount || 0;
+        c.withdrawn = (c.withdrawn || 0) + (x.foreignAmount || 0);
+        return;
+      }
+      c[FX.walletOf(x)].in += x.foreignAmount || 0;
     });
     (entries || []).forEach(function (e) {
       if (!e.currency || e.currency === "KRW" || !out[e.currency]) return;
