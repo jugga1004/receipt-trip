@@ -7,8 +7,9 @@
 //   p/<사진id>.jpg  영수증 사진(한 번 올리면 바뀌지 않음)
 // 새 파일로 쓰는 이유: Blob 공개 주소는 CDN이 캐시해서 같은 이름을 덮어쓰면 옛 내용이 보일 수 있다.
 //
-// 보안: 구분키가 곧 비밀번호다. 파일 주소는 지문(추측 불가) 아래에 있고, 앱은 이 함수로만 읽고 쓴다.
-// 필요한 설정: Vercel 프로젝트 Storage → Blob 저장소 연결(BLOB_READ_WRITE_TOKEN 자동 추가).
+// 보안: 구분키가 곧 비밀번호다. 저장소는 Private(토큰 없이는 주소를 알아도 못 읽음), 폴더는 지문(추측 불가).
+// 앱은 이 함수로만 읽고 쓴다.
+// 필요한 설정: Vercel Storage → Blob 저장소(서울 icn1, Private) 만들 때 "read-write token env var" 체크 → BLOB_READ_WRITE_TOKEN.
 //
 // 요청: POST /sync?a=pull | push | photo-put&id= | photo-get&id=   (헤더 X-Sync-Key: 구분키)
 
@@ -45,6 +46,10 @@ function limited(ip) {
   if (hits.size > 5000) hits.clear();
   return l.length > PER_MIN;
 }
+// Private 저장소라 파일 주소만으로는 못 읽는다 — 토큰을 붙여 읽는다
+function readBlob(url) {
+  return fetch(url, { headers: { Authorization: "Bearer " + process.env.BLOB_READ_WRITE_TOKEN } });
+}
 async function folderOf(key) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("receipt-trip:" + key));
   return "u/" + Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("") + "/";
@@ -73,7 +78,7 @@ export async function POST(request) {
       const { blobs } = await list({ prefix: dir + "d-" });
       if (!blobs.length) return json(200, { data: null }, origin);
       blobs.sort((x, y) => String(y.pathname).localeCompare(String(x.pathname)));
-      const r = await fetch(blobs[0].url);
+      const r = await readBlob(blobs[0].url);
       if (!r.ok) return json(502, { error: "저장된 기록을 읽지 못했습니다." }, origin);
       return json(200, { data: await r.json() }, origin);
     }
@@ -83,7 +88,7 @@ export async function POST(request) {
       if (body.length > MAX_DATA) return json(413, { error: "기록이 너무 큽니다." }, origin);
       JSON.parse(body); // 형식 확인
       const name = dir + "d-" + String(Date.now()).padStart(15, "0") + ".json";
-      await put(name, body, { access: "public", addRandomSuffix: false, contentType: "application/json" });
+      await put(name, body, { access: "private", addRandomSuffix: false, contentType: "application/json" });
       // 옛 묶음은 최근 2개만 남긴다(동시에 쓴 기기가 있어도 한 번은 되돌릴 수 있게)
       const { blobs } = await list({ prefix: dir + "d-" });
       blobs.sort((x, y) => String(y.pathname).localeCompare(String(x.pathname)));
@@ -99,12 +104,13 @@ export async function POST(request) {
       if (a === "photo-put") {
         const buf = await request.arrayBuffer();
         if (buf.byteLength > MAX_PHOTO) return json(413, { error: "사진이 너무 큽니다." }, origin);
-        await put(path, buf, { access: "public", addRandomSuffix: false, allowOverwrite: true, contentType: "image/jpeg" });
+        await put(path, buf, { access: "private", addRandomSuffix: false, allowOverwrite: true, contentType: "image/jpeg" });
         return json(200, { ok: true }, origin);
       }
       const { blobs } = await list({ prefix: path, limit: 1 });
       if (!blobs.length) return json(404, { error: "사진이 없습니다." }, origin);
-      const r = await fetch(blobs[0].url);
+      const r = await readBlob(blobs[0].url);
+      if (!r.ok) return json(502, { error: "사진을 읽지 못했습니다(" + r.status + ")." }, origin);
       return new Response(await r.arrayBuffer(), {
         status: 200,
         headers: Object.assign({ "Content-Type": "image/jpeg", "Cache-Control": "no-store" }, cors(origin)),
