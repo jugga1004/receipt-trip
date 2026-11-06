@@ -438,3 +438,10 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--brand) 5
 .advanced[open] summary::before { content: "▾ "; }
 .advanced[open] summary { margin-bottom: 10px; }
 .hint.neg { color: var(--neg); }
+
+/* 지갑별 잔액(트래블카드·현금) */
+.wallets { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.wallet { background: var(--surface-2); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 2px; }
+.wallet strong { font-size: 20px; letter-spacing: -0.02em; }
+.wallet small { font-size: 12px; }
+.xlist__btns { display: flex; gap: 4px; flex: none; }

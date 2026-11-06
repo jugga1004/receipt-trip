@@ -52,13 +52,20 @@
   t("원화 표시", FX.won(12345), "12,345원");
   t("USD 소수 표시", FX.fmt(12.5, "USD"), "12.50 USD");
 
-  // ---- 남은 현금
-  var cl = FX.cashLeft(xs, [
+  // ---- 지갑별 잔액(트래블카드·현금)
+  var wl = FX.wallets([
+    { currency: "JPY", foreignAmount: 30000, krwAmount: 270000 },              // 예전 기록(값 없음) → 트래블카드
+    { currency: "JPY", foreignAmount: 20000, krwAmount: 185000, to: "cash" },
+  ], [
     { currency: "JPY", total: 5000, payMethod: "cash" },
-    { currency: "JPY", total: 8000, payMethod: "card" },
-    { currency: "JPY", total: 1000, payMethod: "" },
+    { currency: "JPY", total: 8000, payMethod: "card" },   // 예전 "카드" → 트래블카드
+    { currency: "JPY", total: 1000, payMethod: "" },       // 모름 → 트래블카드 충전이 있으니 트래블카드
+    { currency: "JPY", total: 2000, payMethod: "credit" }, // 신용카드 → 잔액에서 안 뺌
   ]);
-  t("남은 현금(카드 제외, 미상은 현금)", cl.JPY.left, 44000);
+  t("트래블카드 잔액(카드·모름 차감)", wl.JPY.travel.left, 21000);
+  t("현금 잔액", wl.JPY.cash.left, 15000);
+  t("신용카드·모름 따로 집계", [wl.JPY.credit, wl.JPY.unknown], [2000, 1000]);
+  t("결제수단 읽기(예전 card → 트래블카드)", [FX.payKind("card"), FX.payKind("credit"), FX.payKind("x")], ["travel", "credit", ""]);
 
   // ---- 정산
   var members = ["나", "민지", "현우"];
@@ -200,10 +207,10 @@
   ];
   var sm = Stats.summary(sbook, sents, xs, krw);
   t("경비: 총액·누락·일수·하루평균", [sm.total, sm.missing, sm.days, sm.perDay], [41400, 1, 3, 13800]);
-  t("경비: 결제수단별", sm.pay, { card: 9100, cash: 27300, unknown: 5000 });
+  t("경비: 결제수단별", sm.pay, { travel: 9100, cash: 27300, credit: 0, unknown: 5000 });
   t("경비: 1인당·사람별 부담", [sm.perHead, sm.perPerson.map(function (p) { return p.owed; })], [20700, [20700, 20700]]);
   t("경비: 카테고리 비율", sm.categories[0], { key: "쇼핑", value: 27300, pct: 66 });
-  t("경비: 남은 현금(JPY)", [sm.fx[0].currency, sm.fx[0].left, sm.fx[0].leftKrw], ["JPY", 47000, 427700]);
+  t("경비: 지갑별 남은 잔액(JPY)", [sm.fx[0].currency, sm.fx[0].travelLeft, sm.fx[0].cashLeft, sm.fx[0].leftKrw], ["JPY", 49000, -3000, 418600]);
   var stxt = Stats.summaryText(sbook, sm);
   t("경비: 복사 글", [stxt.indexOf("총 경비 4,000 JPY + 100.00 THB + 원화 5,000원") > 0, stxt.indexOf("1인당 20,700원") > 0, stxt.indexOf("환율 미등록 1건") > 0], [true, true, true]);
   t("통화별 합계 한 줄", [Stats.currencyLine(sents), Stats.currencyLine([{ currency: "KRW", total: 5000 }])], ["4,000 JPY + 100.00 THB + 원화 5,000원", ""]);
@@ -219,7 +226,7 @@
   var row = csv.split("\r\n")[1];
   t("CSV 따옴표·쉼표 이스케이프", row.indexOf('"Cafe ""A"", Osaka"') >= 0, true);
   t("CSV 수식 주입 방지", row.indexOf("'=카페") >= 0, true);
-  t("CSV 원화·분담자", row.indexOf(",9100,카드,나,나/민지,") >= 0, true);
+  t("CSV 원화·결제수단·분담자", row.indexOf(",9100,트래블카드,나,나/민지,") >= 0, true);
   t("CSV 주소·좌표", row.indexOf("커피×2 1000,,難波3-1,난바,34.665512,135.5012") >= 0, true);
 
   document.getElementById("summary").innerHTML = "<b class='" + (fail ? "fail" : "ok") + "'>" + pass + " passed, " + fail + " failed</b>";

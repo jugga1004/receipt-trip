@@ -5,7 +5,7 @@
   // 원화 환산 — 시장 환율이 아니라 "내가 실제로 바꾼 값"이 기준이다.
   // ---------------------------------------------------------------------
   // 환전을 여러 번 했으면 통화별 가중평균: Σ 원화 / Σ 외화.
-  // 카드 결제는 나중에 청구된 원화를 알면 그 값을 건별로 덮어쓴다(krwOverride),
+  // 신용카드 결제는 나중에 청구된 원화를 알면 그 값을 건별로 덮어쓴다(krwOverride),
   // 환율만 알면 rateOverride.
   // 환율을 모르는 통화는 0으로 치지 않고 null을 돌려준다 — 합계에서 빠졌다는 걸
   // 화면이 알려줄 수 있게. 0으로 섞으면 총액이 조용히 틀린다.
@@ -52,21 +52,51 @@
     };
   };
 
-  // 현금 잔액 추정: 통화별 환전액 − 현금 지출(외화 기준).
-  // 카드 결제는 환전한 돈을 쓰지 않으므로 빼지 않는다. 결제수단 미상은 현금으로 본다
-  // (여행지 소액 영수증은 대부분 현금이라서). 화면에 이 가정을 같이 적는다.
-  FX.cashLeft = function (exchanges, entries) {
+  // ---------------------------------------------------------- 결제수단·잔액
+  // 요즘 여행 환전은 대부분 트래블카드(트래블월렛·트래블로그 등) 충전이라, "카드 = 환전한 외화에서 빠져나가는
+  // 체크카드"로 본다. 원화로 따로 청구되는 신용카드만 환전 잔액에서 빼지 않는다.
+  //   travel: 트래블카드(충전한 외화에서 차감)  cash: 현금  credit: 신용카드(원화 청구)  "": 모름
+  // 예전 기록의 "card"는 트래블카드로 읽는다(사용자 확인, 2026-11-06).
+  FX.PAY = { travel: "트래블카드", cash: "현금", credit: "신용카드" };
+  FX.payKind = function (m) {
+    if (m === "card") return "travel";
+    return FX.PAY[m] ? m : "";
+  };
+  // 환전 기록이 어디로 갔나: travel(트래블카드 충전) | cash(현금 환전). 예전 기록(값 없음)은 트래블카드.
+  FX.WALLET = { travel: "트래블카드", cash: "현금" };
+  FX.walletOf = function (x) {
+    return x && x.to === "cash" ? "cash" : "travel";
+  };
+
+  // 통화별 지갑 잔액(외화 기준): { JPY: { travel:{in,out,left}, cash:{in,out,left}, credit, unknown } }
+  // 결제수단을 모르는 지출은 그 통화에 트래블카드 충전이 있으면 트래블카드, 없으면 현금에서 뺀다.
+  FX.wallets = function (exchanges, entries) {
     var out = {};
+    var cell = function (c) {
+      out[c] = out[c] || { travel: { in: 0, out: 0 }, cash: { in: 0, out: 0 }, credit: 0, unknown: 0 };
+      return out[c];
+    };
     (exchanges || []).forEach(function (x) {
-      out[x.currency] = out[x.currency] || { exchanged: 0, spent: 0 };
-      out[x.currency].exchanged += x.foreignAmount || 0;
+      if (!x.currency) return;
+      cell(x.currency)[FX.walletOf(x)].in += x.foreignAmount || 0;
     });
     (entries || []).forEach(function (e) {
-      if (!out[e.currency] || e.payMethod === "card") return;
-      out[e.currency].spent += e.total || 0;
+      if (!e.currency || e.currency === "KRW" || !out[e.currency]) return;
+      var o = out[e.currency];
+      var k = FX.payKind(e.payMethod);
+      var amt = e.total || 0;
+      if (k === "credit") return void (o.credit += amt);
+      if (!k) {
+        o.unknown += amt;
+        k = o.travel.in > 0 ? "travel" : "cash";
+      }
+      o[k].out += amt;
     });
+    var r2 = function (v) { return Math.round(v * 100) / 100; };
     Object.keys(out).forEach(function (c) {
-      out[c].left = Math.round((out[c].exchanged - out[c].spent) * 100) / 100;
+      ["travel", "cash"].forEach(function (w) {
+        out[c][w].left = r2(out[c][w].in - out[c][w].out);
+      });
     });
     return out;
   };

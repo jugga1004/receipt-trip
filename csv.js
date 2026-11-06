@@ -47,7 +47,7 @@
           e.total,
           rate == null ? "" : Math.round(rate * 10000) / 10000,
           krw == null ? "" : krw,
-          e.payMethod === "card" ? "카드" : e.payMethod === "cash" ? "현금" : "",
+          FX.PAY[FX.payKind(e.payMethod)] || "",
         ];
         if (trip) row.push(e.payer || "", (e.splitAmong && e.splitAmong.length ? e.splitAmong : book.members || []).join("/"));
         row.push(

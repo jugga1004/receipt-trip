@@ -223,7 +223,7 @@
     var cats = SS.ranked(entries, function (e) { return e.category; }, krwFn).map(function (c) {
       return { key: c.key, value: Math.round(c.value), pct: t.total ? Math.round((c.value / t.total) * 100) : 0 };
     });
-    var pay = { card: 0, cash: 0, unknown: 0 };
+    var pay = { travel: 0, cash: 0, credit: 0, unknown: 0 };
     var cur = {};
     var biggest = null;
     entries.forEach(function (e) {
@@ -233,7 +233,7 @@
       cur[c].foreign += e.total || 0;
       if (k == null) { cur[c].missing++; return; }
       cur[c].krw += k;
-      pay[e.payMethod === "card" ? "card" : e.payMethod === "cash" ? "cash" : "unknown"] += k;
+      pay[FX.payKind(e.payMethod) || "unknown"] += k;
       if (!biggest || k > biggest.krw) biggest = { name: e.merchantKo || e.merchant || "(이름 없음)", krw: Math.round(k), date: e.date };
     });
     Object.keys(cur).forEach(function (c) {
@@ -242,13 +242,20 @@
     });
     Object.keys(pay).forEach(function (k) { pay[k] = Math.round(pay[k]); });
 
-    // 환전: 낸 원화 합 + 남은 현금(외화)과 그 원화 가치(가중평균 환율)
+    // 환전: 낸 원화 합 + 지갑별(트래블카드·현금) 남은 외화와 그 원화 가치(가중평균 환율)
     var rates = FX.rates(exchanges);
-    var left = FX.cashLeft(exchanges, entries);
-    var fx = Object.keys(left).map(function (c) {
+    var wal = FX.wallets(exchanges, entries);
+    var fx = Object.keys(wal).map(function (c) {
+      var w = wal[c];
       var paid = exchanges.filter(function (x) { return x.currency === c; }).reduce(function (a, x) { return a + (x.krwAmount || 0); }, 0);
       var r = rates[c] ? rates[c].rate : null;
-      return { currency: c, exchanged: left[c].exchanged, krwPaid: paid, left: left[c].left, leftKrw: r != null ? Math.round(left[c].left * r) : null };
+      var left = Math.round((w.travel.left + w.cash.left) * 100) / 100;
+      return {
+        currency: c, exchanged: w.travel.in + w.cash.in, krwPaid: paid,
+        travelLeft: w.travel.in || w.travel.out ? w.travel.left : null,
+        cashLeft: w.cash.in || w.cash.out ? w.cash.left : null,
+        left: left, leftKrw: r != null ? Math.round(left * r) : null,
+      };
     });
 
     var members = (book.members || []).filter(Boolean);
@@ -289,8 +296,9 @@
       s.categories.forEach(function (c) { L.push("· " + c.key + " " + FX.won(c.value) + " (" + c.pct + "%)"); });
     }
     var payParts = [];
-    if (s.pay.card) payParts.push("카드 " + FX.won(s.pay.card));
+    if (s.pay.travel) payParts.push("트래블카드 " + FX.won(s.pay.travel));
     if (s.pay.cash) payParts.push("현금 " + FX.won(s.pay.cash));
+    if (s.pay.credit) payParts.push("신용카드 " + FX.won(s.pay.credit));
     if (s.pay.unknown) payParts.push("모름 " + FX.won(s.pay.unknown));
     if (payParts.length) L.push("", "결제 " + payParts.join(" / "));
     var foreign = Object.keys(s.currencies).filter(function (c) { return c !== "KRW"; });
@@ -303,7 +311,10 @@
       });
     }
     s.fx.forEach(function (f) {
-      L.push("환전 " + FX.fmt(f.exchanged, f.currency) + " (" + FX.won(f.krwPaid) + ") · 남은 현금 약 " + FX.fmt(f.left, f.currency) + (f.leftKrw != null ? " ≈ " + FX.won(f.leftKrw) : ""));
+      var parts = [];
+      if (f.travelLeft != null) parts.push("트래블카드 " + FX.fmt(f.travelLeft, f.currency));
+      if (f.cashLeft != null) parts.push("현금 " + FX.fmt(f.cashLeft, f.currency));
+      L.push("환전 " + FX.fmt(f.exchanged, f.currency) + " (" + FX.won(f.krwPaid) + ") · 남은 잔액 " + parts.join(" + ") + (f.leftKrw != null ? " ≈ " + FX.won(f.leftKrw) : ""));
     });
     if (s.perPerson) {
       L.push("");

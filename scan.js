@@ -226,7 +226,8 @@
       tax: num(raw.tax),
       discount: Math.abs(num(raw.discount)),
       total: num(raw.total),
-      payMethod: raw.payment === "card" ? "card" : raw.payment === "cash" ? "cash" : "",
+      // 영수증만으론 트래블카드·신용카드를 못 가르니 카드는 트래블카드로(확인 화면에서 바꿀 수 있음)
+      payMethod: raw.payment === "card" ? "travel" : raw.payment === "cash" ? "cash" : "",
       category: cats.indexOf(raw.category) >= 0 ? raw.category : "기타",
       // 좌표는 아직 없다 — app이 Geo.locate로 주소를 좌표로 바꿔 lat/lng를 채운다.
       place: {
@@ -382,6 +383,7 @@
       "- rate: 외화 1단위당 원화 환율. 화면이 '100엔당 905원'처럼 100단위면 9.05로 바꾼다. 없으면 0.",
       "- date: YYYY-MM-DD. 없으면 빈 문자열.",
       "- provider: 은행·서비스 이름(예: 하나은행, 트래블월렛). 모르면 빈 문자열.",
+      "- kind: 트래블카드·외화 체크카드·외화통장 충전(트래블월렛, 트래블로그, 토스 외화통장 등)이면 travel_card, 은행 창구·환전소에서 현금으로 받았으면 cash, 모르면 unknown.",
       "- 계좌번호, 카드번호, 이름, 전화번호 같은 개인정보는 어디에도 적지 않는다.",
       "- note: 환전 기록이 아니거나 확신이 없는 부분이 있으면 한국어 한 문장. 없으면 빈 문자열.",
     ].join("\n");
@@ -401,6 +403,7 @@
             krw_amount: { type: "NUMBER" },
             rate: { type: "NUMBER" },
             provider: { type: "STRING" },
+            kind: { type: "STRING", enum: ["travel_card", "cash", "unknown"] },
           },
           required: ["currency", "foreign_amount", "krw_amount"],
         },
@@ -430,6 +433,7 @@
         krwAmount: Math.round(kr),
         date: /^\d{4}-\d{2}-\d{2}$/.test(x.date || "") ? x.date : "",
         memo: String(x.provider || "").trim(),
+        to: x.kind === "cash" ? "cash" : "travel", // 모르면 트래블카드(요즘 대부분)
       };
     });
     return {
