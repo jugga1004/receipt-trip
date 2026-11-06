@@ -432,3 +432,9 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--brand) 5
 .synckey { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 12px; margin-bottom: 8px; background: var(--surface-2); border-radius: 12px; }
 .synckey span { color: var(--muted); font-size: 13px; flex-basis: 100%; }
 .synckey b { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 17px; letter-spacing: 0.04em; margin-right: auto; }
+.advanced summary { cursor: pointer; list-style: none; }
+.advanced summary::-webkit-details-marker { display: none; }
+.advanced summary::before { content: "▸ "; color: var(--muted); }
+.advanced[open] summary::before { content: "▾ "; }
+.advanced[open] summary { margin-bottom: 10px; }
+.hint.neg { color: var(--neg); }

@@ -40,13 +40,30 @@
     var s = Array.prototype.map.call(b, function (x) { return ALPHA[x % ALPHA.length]; }).join("");
     return "RT-" + s.slice(0, 4) + "-" + s.slice(4, 8) + "-" + s.slice(8, 12);
   };
-  // 사람이 친 키 정리: 소문자·공백·하이픈 없이 쳐도 받아 준다
+  // 사람이 친 키 정리.
+  //  - 자동 키(RT-…): 소문자·하이픈 없이 쳐도 RT-XXXX-XXXX-XXXX로 맞춘다
+  //  - 직접 정한 키: 공백을 빼고 영문은 대문자로(휴대폰에서 대소문자 헷갈려도 같은 키)
+  // 조건에 안 맞으면 ""(이유는 SY.keyProblem으로)
   SY.cleanKey = function (s) {
-    var t = String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (t.indexOf("RT") === 0) t = t.slice(2);
-    if (t.length !== 12) return "";
-    var k = "RT-" + t.slice(0, 4) + "-" + t.slice(4, 8) + "-" + t.slice(8, 12);
-    return SY.KEY_RE.test(k) ? k : "";
+    var raw = String(s || "").trim();
+    var t = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (/^RT[-\s]?[A-Z0-9]{4}[-\s]?[A-Z0-9]{4}[-\s]?[A-Z0-9]{4}$/i.test(raw) && t.length === 14) {
+      var k = "RT-" + t.slice(2, 6) + "-" + t.slice(6, 10) + "-" + t.slice(10, 14);
+      if (SY.KEY_RE.test(k)) return k;
+    }
+    var c = raw.replace(/\s+/g, "").toUpperCase();
+    return SY.keyProblem(c) ? "" : c;
+  };
+  // 직접 정한 키가 왜 안 되는지(괜찮으면 "")
+  SY.keyProblem = function (c) {
+    if (SY.KEY_RE.test(c)) return "";
+    if (c.length < 10) return "10자 이상으로 정해 주세요.";
+    if (c.length > 40) return "40자 이하로 정해 주세요.";
+    if (/[^A-Z0-9가-힣._-]/.test(c)) return "글자·숫자와 - _ . 만 쓸 수 있습니다.";
+    if (!/[A-Z가-힣]/.test(c) || !/[0-9]/.test(c)) return "글자와 숫자를 섞어 주세요.";
+    if (new Set(c).size < 4) return "너무 단순합니다. 다른 글자를 더 섞어 주세요.";
+    if (/0123456789|1234567890|ABCDEFGH|QWERTY|PASSWORD/.test(c)) return "남이 쉽게 맞힐 수 있는 키입니다. 다른 키로 정해 주세요.";
+    return "";
   };
   SY.key = function () { return ls(KEY_STORE) || ""; };
   SY.setKey = function (k) { ls(KEY_STORE, k || null); if (!k) ls(LAST_STORE, null); };
@@ -91,7 +108,8 @@
     var url = base() + "/sync?a=" + a + (extra || "");
     return fetch(url, {
       method: "POST",
-      headers: { "Content-Type": type || "application/json", "X-Sync-Key": SY.key() },
+      // 한글 키는 헤더에 그대로 못 실으므로 인코딩(서버가 decodeURIComponent)
+      headers: { "Content-Type": type || "application/json", "X-Sync-Key": encodeURIComponent(SY.key()) },
       body: body,
     }).then(function (r) {
       if (a === "photo-get") {
@@ -107,6 +125,22 @@
       throw new Error("동기화 서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.");
     });
   }
+
+  // 그 키로 서버에 기록이 이미 있나(직접 정한 키가 남과 겹치는지 확인용) → true/false
+  SY.peek = function (k) {
+    return fetch(base() + "/sync?a=pull", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Sync-Key": encodeURIComponent(k) },
+      body: "{}",
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) throw new Error(j.error || "확인 실패(" + r.status + ")");
+        return !!j.data;
+      });
+    }, function () {
+      throw new Error("동기화 서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.");
+    });
+  };
 
   function localSnapshot() {
     return Promise.all(STORES.map(function (s) { return Store.all(s); })).then(function (r) {

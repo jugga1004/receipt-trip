@@ -19,7 +19,13 @@
 import { put, head } from "@vercel/blob";
 
 const ALLOWED_ORIGINS = ["https://jugga1004.github.io"];
-const KEY_RE = /^RT-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
+// 구분키: 자동으로 만든 RT-XXXX-XXXX-XXXX 또는 사용자가 정한 키(10~40자, 글자+숫자 섞기, 한글 가능).
+// 한글은 HTTP 헤더에 그대로 못 실어서 앱이 encodeURIComponent로 보내고 여기서 푼다.
+const KEY_RE = /^[A-Z0-9가-힣._-]{10,40}$/;
+function keyOk(k) {
+  if (/^RT-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(k)) return true; // 자동으로 만든 키(숫자가 없을 수도 있음)
+  return KEY_RE.test(k) && /[A-Z가-힣]/.test(k) && /[0-9]/.test(k) && new Set(k).size >= 4;
+}
 const ID_RE = /^[a-z0-9]{6,32}$/;
 const MAX_DATA = 4 * 1024 * 1024;
 const MAX_PHOTO = 4 * 1024 * 1024;
@@ -67,8 +73,9 @@ export async function POST(request) {
   const origin = request.headers.get("origin") || "";
   if (!ALLOWED_ORIGINS.includes(origin)) return json(403, { error: "허용되지 않은 사이트입니다." });
   if (!process.env.BLOB_READ_WRITE_TOKEN) return json(500, { error: "서버에 저장 공간(Blob)이 연결되지 않았습니다." }, origin);
-  const key = String(request.headers.get("x-sync-key") || "").toUpperCase();
-  if (!KEY_RE.test(key)) return json(400, { error: "구분키 형식이 올바르지 않습니다." }, origin);
+  let key = "";
+  try { key = decodeURIComponent(String(request.headers.get("x-sync-key") || "")).toUpperCase(); } catch (e) {}
+  if (!keyOk(key)) return json(400, { error: "구분키 형식이 올바르지 않습니다." }, origin);
   const ip = (request.headers.get("x-forwarded-for") || "?").split(",")[0].trim();
   if (limited(ip)) return json(429, { error: "요청이 너무 잦습니다. 잠시 뒤 다시 시도해 주세요." }, origin);
 

@@ -1576,12 +1576,12 @@
       "<li>이 앱은 AI(Claude)의 도움을 받아 만들었습니다.</li>" +
       "</ul></div></section>" +
       syncPanel() +
-      '<section class="panel"><h2>백업 · 복원</h2>' +
-      '<p class="hint">기록은 이 브라우저에만 있습니다. 브라우저 데이터를 지우거나 폰을 바꾸면 사라지니 가끔 백업해 두세요.</p>' +
+      '<details class="panel advanced"><summary><b>고급 · 백업 파일</b> <small class="muted">동기화와 별도로 파일로 보관</small></summary>' +
+      '<p class="hint">동기화는 백업이 아닙니다. 한 기기에서 지우면 모든 기기에서 지워지고, 구분키를 잃으면 서버 기록도 찾을 수 없습니다. 큰 여행이 끝나면 한 번씩 파일로 받아 두세요.</p>' +
       '<button type="button" class="btn btn--ghost btn--block" id="bkLite">백업 파일 받기 (사진 제외, 가벼움)</button>' +
       '<button type="button" class="btn btn--ghost btn--block" id="bkFull">백업 파일 받기 (사진 포함)</button>' +
       '<button type="button" class="btn btn--ghost btn--block" id="bkRestore">백업 파일로 복원 (기존 기록과 합치기)</button>' +
-      '<p class="hint" id="storageInfo"></p></section>';
+      '<p class="hint" id="storageInfo"></p></details>';
 
     wireSync();
     document.getElementById("keyForm").addEventListener("submit", function (ev) {
@@ -1626,13 +1626,17 @@
     if (!k) {
       html +=
         '<p class="hint" style="margin:0 0 10px">구분키를 만들면 기록·사진이 서버에 저장되고, 다른 기기에 같은 구분키를 넣으면 같은 기록을 봅니다. 로그인은 필요 없습니다.</p>' +
-        '<button type="button" class="btn btn--primary btn--block" id="syncNew">이 기기에서 구분키 만들기</button>' +
-        '<form id="syncJoin" class="form" style="margin-top:12px"><label class="field"><span>다른 기기에서 만든 구분키가 있으면</span>' +
-        '<input name="k" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="RT-XXXX-XXXX-XXXX"></label>' +
+        '<form id="syncMine" class="form"><label class="field"><span>구분키 직접 정하기 <small class="muted">(10자 이상, 글자+숫자, 한글 가능)</small></span>' +
+        '<input name="k" autocomplete="off" spellcheck="false" maxlength="40" placeholder="예: 오사카여행2026jh, minji-trip-0417"></label>' +
+        '<p class="hint" id="syncMineHint" style="margin:0">외우기 쉬운 키로 정하되, 남이 맞히기 어렵게 해 주세요. 대·소문자는 구분하지 않습니다.</p>' +
+        '<button class="btn btn--primary btn--block">이 키로 시작</button></form>' +
+        '<button type="button" class="btn btn--ghost btn--block" id="syncNew" style="margin-top:8px">키를 자동으로 만들기</button>' +
+        '<form id="syncJoin" class="form" style="margin-top:16px"><label class="field"><span>다른 기기에서 이미 쓰는 구분키가 있으면</span>' +
+        '<input name="k" autocomplete="off" spellcheck="false" maxlength="40" placeholder="그 구분키 입력"></label>' +
         '<button class="btn btn--ghost btn--block">이 구분키로 불러오기</button></form>';
     } else {
       html +=
-        '<div class="synckey"><span>내 구분키</span><b id="syncKeyText">' + esc(k.slice(0, 7)) + '-••••-••••</b>' +
+        '<div class="synckey"><span>내 구분키</span><b id="syncKeyText">' + esc(k.slice(0, Math.min(4, k.length - 6))) + "••••••</b>" +
         '<button type="button" class="btn btn--ghost btn--sm" id="syncShow">보기</button>' +
         '<button type="button" class="btn btn--ghost btn--sm" id="syncCopy">복사</button></div>' +
         '<p class="hint" id="syncStatus">' + (last ? "마지막 동기화: " + esc(new Date(last).toLocaleString("ko-KR")) : "아직 동기화하지 않았습니다.") + "</p>" +
@@ -1658,18 +1662,49 @@
         alert("내 구분키: " + k + "\n\n다른 기기에서 이 키를 넣으면 같은 기록을 볼 수 있습니다. 잃어버리면 찾을 수 없으니 꼭 적어 두세요.");
       });
     };
+    // 다른 기기에서 쓰던 키 불러오기: 서버에 기록이 없으면 오타일 가능성이 커서 멈추고 알린다
     var jf = document.getElementById("syncJoin");
     if (jf) jf.addEventListener("submit", function (ev) {
       ev.preventDefault();
-      var k = Sync.cleanKey(jf.k.value);
-      if (!k) return toast("구분키 형식이 맞지 않습니다. RT-로 시작하는 12자리를 확인해 주세요.", 4000);
-      Sync.setKey(k);
-      toast("기록을 불러오는 중…", 3000);
-      runSyncLoud().then(function (r) {
-        viewSettings();
-        if (r) toast("불러왔습니다. 이 기기의 기록과 합쳐졌습니다.", 4000);
-      });
+      var raw = jf.k.value;
+      var k = Sync.cleanKey(raw);
+      if (!k) return toast("구분키가 맞지 않습니다. " + (Sync.keyProblem(raw.replace(/\s+/g, "").toUpperCase()) || "다시 확인해 주세요."), 4500);
+      toast("구분키를 확인하는 중…", 2500);
+      Sync.peek(k).then(function (has) {
+        if (!has) return toast("이 구분키로 저장된 기록이 없습니다. 오타가 없는지 확인해 주세요. 새로 시작하려면 위의 '직접 정하기'를 쓰세요.", 6000);
+        Sync.setKey(k);
+        return runSyncLoud().then(function (r) {
+          viewSettings();
+          if (r) toast("불러왔습니다. 이 기기의 기록과 합쳐졌습니다.", 4000);
+        });
+      }, function (err) { toast(err.message, 5000); });
     });
+    // 직접 정한 키로 시작: 이미 누가 쓰는 키면(내 다른 기기일 수도 있음) 물어본다
+    var mf = document.getElementById("syncMine");
+    if (mf) {
+      var hint = document.getElementById("syncMineHint");
+      mf.k.addEventListener("input", function () {
+        var c = mf.k.value.replace(/\s+/g, "").toUpperCase();
+        var p = c ? Sync.keyProblem(c) : "";
+        hint.textContent = p || (c ? "좋습니다. 이 키를 꼭 따로 적어 두세요." : "외우기 쉬운 키로 정하되, 남이 맞히기 어렵게 해 주세요. 대·소문자는 구분하지 않습니다.");
+        hint.className = "hint" + (p ? " neg" : "");
+      });
+      mf.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var c = mf.k.value.replace(/\s+/g, "").toUpperCase();
+        var p = Sync.keyProblem(c);
+        if (p) return toast(p, 4000);
+        toast("구분키를 확인하는 중…", 2500);
+        Sync.peek(c).then(function (has) {
+          if (has && !confirm("이 구분키로 이미 저장된 기록이 있습니다.\n\n내 다른 기기에서 쓰던 키가 맞으면 [확인]을 눌러 불러오고, 아니면 [취소]하고 다른 키를 정해 주세요.")) return;
+          Sync.setKey(c);
+          return runSyncLoud().then(function () {
+            viewSettings();
+            alert("내 구분키: " + c + "\n\n다른 기기에서 이 키를 넣으면 같은 기록을 볼 수 있습니다. 잃어버리면 찾을 수 없으니 꼭 적어 두세요.");
+          });
+        }, function (err) { toast(err.message, 5000); });
+      });
+    }
     var sh = document.getElementById("syncShow");
     if (sh) sh.onclick = function () {
       document.getElementById("syncKeyText").textContent = Sync.key();
