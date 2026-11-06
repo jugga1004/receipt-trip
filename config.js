@@ -3,4 +3,6 @@
 //   (Cloudflare Worker는 Gemini가 "지원 안 하는 지역"으로 거절해서 2026-11 Vercel로 옮김)
 var APP_CONFIG = {
   proxyUrl: "https://receipt-trip-jugga1004s-projects.vercel.app",
+  // syncUrl: 기기 간 동기화 서버(api/sync.js). 구분키로 기록을 맞춘다.
+  syncUrl: "https://receipt-trip-jugga1004s-projects.vercel.app",
 };

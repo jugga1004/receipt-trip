@@ -1575,6 +1575,7 @@
       "<li>\"지금 내 위치\" 버튼을 누를 때만 기기 위치를 묻습니다.</li>" +
       "<li>이 앱은 AI(Claude)의 도움을 받아 만들었습니다.</li>" +
       "</ul></div></section>" +
+      syncPanel() +
       '<section class="panel"><h2>백업 · 복원</h2>' +
       '<p class="hint">기록은 이 브라우저에만 있습니다. 브라우저 데이터를 지우거나 폰을 바꾸면 사라지니 가끔 백업해 두세요.</p>' +
       '<button type="button" class="btn btn--ghost btn--block" id="bkLite">백업 파일 받기 (사진 제외, 가벼움)</button>' +
@@ -1582,6 +1583,7 @@
       '<button type="button" class="btn btn--ghost btn--block" id="bkRestore">백업 파일로 복원 (기존 기록과 합치기)</button>' +
       '<p class="hint" id="storageInfo"></p></section>';
 
+    wireSync();
     document.getElementById("keyForm").addEventListener("submit", function (ev) {
       ev.preventDefault();
       Store.saveSettings({ geminiKey: this.key.value.trim(), geminiModel: this.model.value.trim() || Scan.DEFAULT_MODEL });
@@ -1616,6 +1618,109 @@
       .catch(function (err) { toast("복원 실패: " + err.message, 5000); });
   });
 
+  // ============================================================ 기기 간 동기화(구분키)
+  function syncPanel() {
+    var k = Sync.key();
+    var last = Sync.lastAt();
+    var html = '<section class="panel" id="syncPanel"><h2>기기 간 동기화 (구분키)</h2>';
+    if (!k) {
+      html +=
+        '<p class="hint" style="margin:0 0 10px">구분키를 만들면 기록·사진이 서버에 저장되고, 다른 기기에 같은 구분키를 넣으면 같은 기록을 봅니다. 로그인은 필요 없습니다.</p>' +
+        '<button type="button" class="btn btn--primary btn--block" id="syncNew">이 기기에서 구분키 만들기</button>' +
+        '<form id="syncJoin" class="form" style="margin-top:12px"><label class="field"><span>다른 기기에서 만든 구분키가 있으면</span>' +
+        '<input name="k" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="RT-XXXX-XXXX-XXXX"></label>' +
+        '<button class="btn btn--ghost btn--block">이 구분키로 불러오기</button></form>';
+    } else {
+      html +=
+        '<div class="synckey"><span>내 구분키</span><b id="syncKeyText">' + esc(k.slice(0, 7)) + '-••••-••••</b>' +
+        '<button type="button" class="btn btn--ghost btn--sm" id="syncShow">보기</button>' +
+        '<button type="button" class="btn btn--ghost btn--sm" id="syncCopy">복사</button></div>' +
+        '<p class="hint" id="syncStatus">' + (last ? "마지막 동기화: " + esc(new Date(last).toLocaleString("ko-KR")) : "아직 동기화하지 않았습니다.") + "</p>" +
+        '<button type="button" class="btn btn--primary btn--block" id="syncNow">지금 동기화</button>' +
+        '<button type="button" class="btn btn--ghost btn--block" id="syncOff">이 기기에서 구분키 해제</button>';
+    }
+    html += '<div class="notice"><b>꼭 알아 두세요</b><ul>' +
+      "<li><b>구분키가 곧 비밀번호</b>입니다. 이 키를 아는 사람은 누구나 기록과 영수증 사진을 볼 수 있으니 남에게 알려 주지 마세요.</li>" +
+      "<li>구분키를 잃어버리면 찾을 방법이 없습니다. 메모장 등에 따로 적어 두세요.</li>" +
+      "<li>기록과 사진은 운영자의 Vercel 저장 공간(미국)에 저장됩니다.</li>" +
+      "</ul></div></section>";
+    return html;
+  }
+
+  function wireSync() {
+    var nw = document.getElementById("syncNew");
+    if (nw) nw.onclick = function () {
+      var k = Sync.newKey();
+      Sync.setKey(k);
+      toast("구분키를 만들었습니다. 지금 기록을 올립니다…", 3000);
+      runSyncLoud().then(function () {
+        viewSettings();
+        alert("내 구분키: " + k + "\n\n다른 기기에서 이 키를 넣으면 같은 기록을 볼 수 있습니다. 잃어버리면 찾을 수 없으니 꼭 적어 두세요.");
+      });
+    };
+    var jf = document.getElementById("syncJoin");
+    if (jf) jf.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var k = Sync.cleanKey(jf.k.value);
+      if (!k) return toast("구분키 형식이 맞지 않습니다. RT-로 시작하는 12자리를 확인해 주세요.", 4000);
+      Sync.setKey(k);
+      toast("기록을 불러오는 중…", 3000);
+      runSyncLoud().then(function (r) {
+        viewSettings();
+        if (r) toast("불러왔습니다. 이 기기의 기록과 합쳐졌습니다.", 4000);
+      });
+    });
+    var sh = document.getElementById("syncShow");
+    if (sh) sh.onclick = function () {
+      document.getElementById("syncKeyText").textContent = Sync.key();
+      sh.remove();
+    };
+    var cp = document.getElementById("syncCopy");
+    if (cp) cp.onclick = function () { copyText(Sync.key()); };
+    var now = document.getElementById("syncNow");
+    if (now) now.onclick = function () {
+      now.disabled = true;
+      runSyncLoud().then(function () { viewSettings(); });
+    };
+    var off = document.getElementById("syncOff");
+    if (off) off.onclick = function () {
+      if (!confirm("이 기기에서 구분키를 해제할까요? 이 기기의 기록은 그대로 남고, 서버의 기록도 지워지지 않습니다. 다시 맞추려면 구분키를 다시 넣으면 됩니다.")) return;
+      Sync.setKey("");
+      viewSettings();
+    };
+  }
+
+  // 사용자가 누른 동기화: 결과를 알리고, 실패하면 이유를 보여 준다
+  function runSyncLoud() {
+    return Sync.run().then(function (r) {
+      if (r) toast("동기화 완료" + (r.pulled ? " · 받은 변경 " + r.pulled + "건" : "") + (r.photosUp ? " · 올린 사진 " + r.photosUp + "장" : "") + (r.photosDown ? " · 받은 사진 " + r.photosDown + "장" : ""), 3500);
+      return r;
+    }, function (err) {
+      toast(err.message, 6000);
+      return null;
+    });
+  }
+
+  // 자동 동기화: 저장할 때(4초 모아서), 앱을 열 때, 다시 화면에 돌아왔을 때(1분 넘었으면)
+  Store.onChange = function () { Sync.schedule(); };
+  Sync.onDone = function (r, err) {
+    var st = document.getElementById("syncStatus");
+    if (st) st.textContent = err ? "동기화 실패: " + err.message : "마지막 동기화: " + new Date().toLocaleString("ko-KR");
+    // 다른 기기에서 바뀐 게 들어왔으면 지금 화면을 새로 그린다(입력 중인 화면은 건드리지 않음)
+    if (r && r.pulled) {
+      var p = (location.hash || curPath).replace(/^#\/?/, "").split("/")[0];
+      if (p === "" || p === "book") {
+        var y = window.scrollY;
+        Promise.resolve(route()).then(function () { window.scrollTo(0, y); });
+      }
+    }
+  };
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "visible" || !Sync.enabled()) return;
+    var last = Date.parse(Sync.lastAt() || 0) || 0;
+    if (Date.now() - last > 60000) Sync.run().catch(function () {});
+  });
+
   // ============================================================ 시작
   window.addEventListener("hashchange", route);
   // 인식 서버가 붐벼 다시 시도할 때 화면 아래에 알린다(영수증·환전·여행 일정 공통)
@@ -1628,6 +1733,8 @@
     // 저장 공간을 브라우저가 임의로 비우지 않게 요청(허용 여부는 브라우저 판단)
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
     route();
+    // 구분키가 있으면 앱을 열 때 한 번 맞춘다
+    if (Sync.enabled()) Sync.run().catch(function () {});
   });
 
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {

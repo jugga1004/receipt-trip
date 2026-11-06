@@ -2,7 +2,7 @@
   "use strict";
 
   // ---------------------------------------------------------------------
-  // 저장소 — 모든 데이터는 이 기기의 IndexedDB에만 둔다.
+  // 저장소 — 이 기기의 IndexedDB. 구분키를 만들면 sync.js가 서버(Vercel)와 맞춘다.
   // ---------------------------------------------------------------------
   // 영수증 사진(Blob)까지 들고 있어야 해서 localStorage(5MB, 문자열만)로는 안 된다.
   //
@@ -113,27 +113,57 @@
     });
   };
 
-  S.put = function (store, obj) {
+  // 동기화용: 저장할 때마다 수정 시각(updatedAt)을 찍고, 지우면 "지움 표시"(tombstone)를 남긴다.
+  // 두 기기에서 따로 고쳐도 기록마다 더 최근 것으로 합칠 수 있게. 동기화가 내려받아 넣을 때는
+  // opts.sync = true 로 불러 시각을 덮어쓰지 않고, 변경 알림(onChange)도 보내지 않는다.
+  var TOMB_KEY = "receipt-book.tomb";
+  S.onChange = null;
+  function changed() {
+    if (S.onChange) try { S.onChange(); } catch (e) {}
+  }
+  S.tombs = function () {
+    try { return JSON.parse(localStorage.getItem(TOMB_KEY) || "{}"); } catch (e) { return S._memTomb || {}; }
+  };
+  S.saveTombs = function (t) {
+    try { localStorage.setItem(TOMB_KEY, JSON.stringify(t)); } catch (e) { S._memTomb = t; }
+  };
+  function addTomb(store, id) {
+    var t = S.tombs();
+    t[store] = t[store] || {};
+    t[store][id] = new Date().toISOString();
+    S.saveTombs(t);
+  }
+
+  S.put = function (store, obj, opts) {
+    opts = opts || {};
     if (!obj.id) obj.id = S.uid();
+    if (!opts.sync && store !== "photos") obj.updatedAt = new Date().toISOString();
+    var done = function () {
+      if (!opts.sync) changed();
+      return obj;
+    };
     if (mem) {
       mem[store].set(obj.id, clone(obj));
-      return Promise.resolve(obj);
+      return Promise.resolve(done());
     }
     return tx(store, "readwrite", function (os) {
       os.put(obj);
-    }).then(function () {
-      return obj;
-    });
+    }).then(done);
   };
 
-  S.del = function (store, id) {
+  S.del = function (store, id, opts) {
+    opts = opts || {};
+    if (!opts.sync && store !== "photos") addTomb(store, id);
+    var done = function () {
+      if (!opts.sync) changed();
+    };
     if (mem) {
       mem[store].delete(id);
-      return Promise.resolve();
+      return Promise.resolve(done());
     }
     return tx(store, "readwrite", function (os) {
       os.delete(id);
-    });
+    }).then(done);
   };
 
   // 가계부를 지우면 딸린 지출·환전·사진도 같이 지운다. 고아 사진이 용량을 먹지 않게.

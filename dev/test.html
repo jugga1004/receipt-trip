@@ -13,6 +13,7 @@
 <p id="summary"></p>
 <ol id="out"></ol>
 <script src="../store.js"></script>
+<script src="../sync.js"></script>
 <script src="../fx.js"></script>
 <script src="../geo.js"></script>
 <script src="../map.js"></script>
@@ -157,6 +158,25 @@
   ] }).legs);
   t("예약: 국내(제주) → 외화 없음·렌터카 반납일까지", [jj.currencies, jj.end, jj.name], [[], "2026-12-23", "12월 제주 3박 4일"]);
   t("여행지 글자 → 외화", [Scan.currenciesFor("오사카"), Scan.currenciesFor("도쿄·방콕"), Scan.currenciesFor("제주 2박"), Scan.currenciesFor("파리, 로마"), Scan.currenciesFor("테니스 여행")], [["JPY"], ["JPY", "THB"], [], ["EUR"], []]);
+
+  // ---- 기기 간 동기화
+  var k1 = Sync.newKey();
+  t("구분키 형식", Sync.KEY_RE.test(k1), true);
+  t("구분키 정리(소문자·하이픈 없이)", Sync.cleanKey(k1.toLowerCase().replace(/-/g, "")), k1);
+  t("잘못된 구분키", Sync.cleanKey("RT-1234"), "");
+  var A = { books: [{ id: "b1", name: "오사카", updatedAt: "2026-11-01T00:00:00Z" }], entries: [
+    { id: "e1", total: 100, updatedAt: "2026-11-03T10:00:00Z" },
+    { id: "e2", total: 200, updatedAt: "2026-11-03T10:00:00Z" },
+  ], exchanges: [], tomb: { entries: { e3: "2026-11-04T00:00:00Z" } } };
+  var B = { books: [{ id: "b1", name: "오사카 여행", updatedAt: "2026-11-02T00:00:00Z" }], entries: [
+    { id: "e1", total: 150, updatedAt: "2026-11-03T09:00:00Z" },  // 더 예전 수정 → A가 이김
+    { id: "e3", total: 300, updatedAt: "2026-11-03T12:00:00Z" },  // A에서 그 뒤에 지움 → 지워짐
+    { id: "e4", total: 400, updatedAt: "2026-11-05T00:00:00Z" },  // B에만 있음 → 들어옴
+  ], exchanges: [], tomb: { entries: { e2: "2026-11-02T00:00:00Z" } } }; // e2는 지운 뒤에 A가 다시 고침 → 살아남음
+  var M = Sync.merge(A, B);
+  t("합치기: 여행은 더 최근 이름", M.books[0].name, "오사카 여행");
+  t("합치기: 영수증(최근 수정 우선·지움 반영·새 기록)", M.entries.map(function (e) { return e.id + ":" + e.total; }).sort(), ["e1:100", "e2:200", "e4:400"]);
+  t("합치기: 지움 표시 합침", Object.keys(M.tomb.entries).sort(), ["e2", "e3"]);
 
   // ---- 통계
   var se = [

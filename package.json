@@ -1,5 +1,8 @@
 {
   "name": "receipt-trip",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@vercel/blob": "^1.1.1"
+  }
 }

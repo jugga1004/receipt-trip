@@ -1,3 +1,4 @@
 # 번들은 검증용으로 그때그때 만드는 파일이라 저장소에 넣지 않는다.
 dev/_bundle.html
 dev/_test_bundle.html
+node_modules/

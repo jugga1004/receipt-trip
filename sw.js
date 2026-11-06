@@ -15,13 +15,14 @@
 //
 // 참고: 서비스워커는 https 또는 localhost에서만 등록된다. index.html을 file://로 열면
 // 등록이 안 되지만, app.js가 그 경우를 건너뛰도록 처리해두어서 앱 자체는 정상 동작한다.
-var CACHE_NAME = "receipt-book-v3";
+var CACHE_NAME = "receipt-book-v4";
 var APP_SHELL = [
   "./",
   "./index.html",
   "./style.css",
   "./config.js",
   "./store.js",
+  "./sync.js",
   "./fx.js",
   "./geo.js",
   "./map.js",
