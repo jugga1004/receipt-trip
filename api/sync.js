@@ -1,19 +1,22 @@
 // =====================================================================
-// 영수증 여행기록 — 기기 간 동기화 (Vercel 함수 + Vercel Blob 저장소)
+// 영수증 여행기록 — 기기 간 동기화 (Vercel 함수 + Vercel Blob 저장소, 서울 icn1, Private)
 // =====================================================================
 // 로그인 대신 "구분키"(예: RT-7K2F-9QXA-M3PD)로 사용자를 나눈다. 구분키는 저장하지 않고
 // SHA-256 지문으로만 폴더를 만든다: u/<지문>/
-//   d-<시각>.json   기록 묶음(여행·영수증·환전·지움 표시). 쓸 때마다 새 파일, 옛 것은 2개만 남김
+//   data.json       기록 묶음(여행·영수증·환전·지움 표시). 덮어쓴다
 //   p/<사진id>.jpg  영수증 사진(한 번 올리면 바뀌지 않음)
-// 새 파일로 쓰는 이유: Blob 공개 주소는 CDN이 캐시해서 같은 이름을 덮어쓰면 옛 내용이 보일 수 있다.
+//
+// 무료 한도 아끼기(Hobby: Advanced 월 2,000회 / Simple 월 10,000회, 2026-11 대시보드 기준):
+//   put·list = Advanced, head·읽기 = Simple. 그래서 list는 쓰지 않고 고정 경로를 head로 찾는다.
+//   → 받기(pull) = Simple 2회, 올리기(push) = Advanced 1회, 사진 1장 올리기 = Advanced 1회.
 //
 // 보안: 구분키가 곧 비밀번호다. 저장소는 Private(토큰 없이는 주소를 알아도 못 읽음), 폴더는 지문(추측 불가).
 // 앱은 이 함수로만 읽고 쓴다.
-// 필요한 설정: Vercel Storage → Blob 저장소(서울 icn1, Private) 만들 때 "read-write token env var" 체크 → BLOB_READ_WRITE_TOKEN.
+// 필요한 설정: Blob 저장소를 만들 때 "read-write token env var" 체크 → BLOB_READ_WRITE_TOKEN.
 //
 // 요청: POST /sync?a=pull | push | photo-put&id= | photo-get&id=   (헤더 X-Sync-Key: 구분키)
 
-import { put, list, del } from "@vercel/blob";
+import { put, head } from "@vercel/blob";
 
 const ALLOWED_ORIGINS = ["https://jugga1004.github.io"];
 const KEY_RE = /^RT-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
@@ -73,13 +76,23 @@ export async function POST(request) {
   const a = url.searchParams.get("a");
   const dir = await folderOf(key);
 
+  // head: 없으면 null(던지지 않게). 덮어쓴 파일의 옛 내용이 캐시로 오지 않게 주소에 시각을 붙여 읽는다
+  async function find(path) {
+    try {
+      return await head(path);
+    } catch (e) {
+      if (/not.?found|does not exist/i.test(String((e && e.message) || e)) || (e && e.name === "BlobNotFoundError")) return null;
+      throw e;
+    }
+  }
+  const fresh = (b) => b.url + (b.url.includes("?") ? "&" : "?") + "v=" + new Date(b.uploadedAt).getTime();
+
   try {
     if (a === "pull") {
-      const { blobs } = await list({ prefix: dir + "d-" });
-      if (!blobs.length) return json(200, { data: null }, origin);
-      blobs.sort((x, y) => String(y.pathname).localeCompare(String(x.pathname)));
-      const r = await readBlob(blobs[0].url);
-      if (!r.ok) return json(502, { error: "저장된 기록을 읽지 못했습니다." }, origin);
+      const b = await find(dir + "data.json");
+      if (!b) return json(200, { data: null }, origin);
+      const r = await readBlob(fresh(b));
+      if (!r.ok) return json(502, { error: "저장된 기록을 읽지 못했습니다(" + r.status + ")." }, origin);
       return json(200, { data: await r.json() }, origin);
     }
 
@@ -87,13 +100,7 @@ export async function POST(request) {
       const body = await request.text();
       if (body.length > MAX_DATA) return json(413, { error: "기록이 너무 큽니다." }, origin);
       JSON.parse(body); // 형식 확인
-      const name = dir + "d-" + String(Date.now()).padStart(15, "0") + ".json";
-      await put(name, body, { access: "private", addRandomSuffix: false, contentType: "application/json" });
-      // 옛 묶음은 최근 2개만 남긴다(동시에 쓴 기기가 있어도 한 번은 되돌릴 수 있게)
-      const { blobs } = await list({ prefix: dir + "d-" });
-      blobs.sort((x, y) => String(y.pathname).localeCompare(String(x.pathname)));
-      const old = blobs.slice(2).map((b) => b.url);
-      if (old.length) await del(old);
+      await put(dir + "data.json", body, { access: "private", addRandomSuffix: false, allowOverwrite: true, contentType: "application/json", cacheControlMaxAge: 60 });
       return json(200, { ok: true }, origin);
     }
 
@@ -107,9 +114,9 @@ export async function POST(request) {
         await put(path, buf, { access: "private", addRandomSuffix: false, allowOverwrite: true, contentType: "image/jpeg" });
         return json(200, { ok: true }, origin);
       }
-      const { blobs } = await list({ prefix: path, limit: 1 });
-      if (!blobs.length) return json(404, { error: "사진이 없습니다." }, origin);
-      const r = await readBlob(blobs[0].url);
+      const b = await find(path);
+      if (!b) return json(404, { error: "사진이 없습니다." }, origin);
+      const r = await readBlob(b.url);
       if (!r.ok) return json(502, { error: "사진을 읽지 못했습니다(" + r.status + ")." }, origin);
       return new Response(await r.arrayBuffer(), {
         status: 200,
